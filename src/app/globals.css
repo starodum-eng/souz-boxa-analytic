@@ -156,3 +156,13 @@ th {
   border-color: var(--accent);
   color: #fff;
 }
+.controls button.sync-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.controls button.sync-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

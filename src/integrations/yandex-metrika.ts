@@ -11,13 +11,14 @@ import type { WebSessionRow, DateRange } from "./types";
 const API_URL = "https://api-metrika.yandex.net/stat/v1/data";
 
 export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRow[]> {
-  const token = process.env.YANDEX_METRIKA_TOKEN;
+  // Общий токен Яндекса подходит и для Метрики (см. YANDEX_TOKEN).
+  const token = process.env.YANDEX_METRIKA_TOKEN || process.env.YANDEX_TOKEN;
   const counterId = process.env.YANDEX_METRIKA_COUNTER_ID;
   // ID цели в Метрике, которую считаем «лидом» (напр. отправка формы заявки).
   // У Метрики нет общей метрики достижений — только по конкретной цели:
   // ym:s:goal<ID>reaches. Если не задан — грузим визиты, лиды = 0.
   const goalId = process.env.YANDEX_METRIKA_GOAL_ID?.trim();
-  if (!token) throw new Error("YANDEX_METRIKA_TOKEN is not set");
+  if (!token) throw new Error("YANDEX_METRIKA_TOKEN / YANDEX_TOKEN is not set");
   if (!counterId) throw new Error("YANDEX_METRIKA_COUNTER_ID is not set");
 
   const metrics = ["ym:s:visits", "ym:s:users", "ym:s:bounceRate"];

@@ -12,6 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { rub, num, pct, SOURCE_LABEL } from "@/lib/format";
+import { syncNow } from "@/app/actions";
 
 interface Totals {
   cost: number;
@@ -58,15 +59,41 @@ export default function Dashboard() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+
+  function loadMetrics() {
+    return fetch(`/api/metrics?days=${days}`)
+      .then((r) => r.json())
+      .then(setData)
+      .catch((e) => setError(String(e)));
+  }
 
   useEffect(() => {
     setData(null);
     setError(null);
-    fetch(`/api/metrics?days=${days}`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch((e) => setError(String(e)));
+    loadMetrics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const results = await syncNow();
+      const ok = results.filter((r) => r.status === "ok");
+      const fail = results.filter((r) => r.status !== "ok");
+      setSyncMsg(
+        `Готово. Загружено: ${ok.map((r) => `${SOURCE_LABEL[r.source] ?? r.source} (${r.rows})`).join(", ") || "—"}` +
+          (fail.length ? ` · Ошибки: ${fail.map((r) => SOURCE_LABEL[r.source] ?? r.source).join(", ")}` : ""),
+      );
+      await loadMetrics();
+    } catch (e) {
+      setSyncMsg(`Ошибка синхронизации: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const t = data?.totals;
   const romi = t && Number(t.cost) > 0 ? (Number(t.revenue) - Number(t.cost)) / Number(t.cost) : null;
@@ -84,9 +111,13 @@ export default function Dashboard() {
               {r} дн.
             </button>
           ))}
+          <button onClick={handleSync} disabled={syncing} className="sync-btn">
+            {syncing ? "Обновление…" : "Обновить данные"}
+          </button>
         </div>
       </div>
 
+      {syncMsg && <div className="card muted" style={{ marginBottom: 16 }}>{syncMsg}</div>}
       {error && <div className="card neg">Ошибка загрузки: {error}</div>}
       {!data && !error && <div className="card muted">Загрузка…</div>}
 

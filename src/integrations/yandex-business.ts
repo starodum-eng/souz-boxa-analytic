@@ -20,7 +20,7 @@ export interface BusinessRow {
 }
 
 export async function fetchYandexBusiness(range: DateRange): Promise<BusinessRow[]> {
-  const token = process.env.YANDEX_BUSINESS_TOKEN;
+  const token = process.env.YANDEX_BUSINESS_TOKEN || process.env.YANDEX_TOKEN;
   const companyId = process.env.YANDEX_BUSINESS_COMPANY_ID;
   if (!token || !companyId) {
     // Не роняем весь синк, если доступ к Бизнесу ещё не настроен.

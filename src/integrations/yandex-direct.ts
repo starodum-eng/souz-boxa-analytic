@@ -16,8 +16,10 @@ import type { AdSpendRow, DateRange } from "./types";
 const REPORTS_URL = "https://api.direct.yandex.com/json/v5/reports";
 
 export async function fetchYandexDirectSpend(range: DateRange): Promise<AdSpendRow[]> {
-  const token = process.env.YANDEX_DIRECT_TOKEN;
-  if (!token) throw new Error("YANDEX_DIRECT_TOKEN is not set");
+  // Один OAuth-токен Яндекса покрывает Директ + Метрику. Можно задать общий
+  // YANDEX_TOKEN, а YANDEX_DIRECT_TOKEN использовать только для переопределения.
+  const token = process.env.YANDEX_DIRECT_TOKEN || process.env.YANDEX_TOKEN;
+  if (!token) throw new Error("YANDEX_DIRECT_TOKEN / YANDEX_TOKEN is not set");
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
