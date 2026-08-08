@@ -53,6 +53,13 @@ export async function GET(req: Request) {
     ORDER BY date
   `);
 
+  // Новые клиенты Fitbase за период (CRM-конверсия, нижняя ступень воронки).
+  const clientsAgg = await db.execute(sql`
+    SELECT COUNT(*)::int AS new_clients
+    FROM clients
+    WHERE created_at >= CURRENT_DATE - ${days}::int
+  `);
+
   const lastSync = await db.execute(sql`
     SELECT source, status, rows_upserted, message, finished_at
     FROM sync_log
@@ -61,7 +68,7 @@ export async function GET(req: Request) {
   `);
 
   return NextResponse.json({
-    totals: totals.rows[0] ?? {},
+    totals: { ...(totals.rows[0] ?? {}), new_clients: clientsAgg.rows[0]?.new_clients ?? 0 },
     bySource: bySource.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,

@@ -4,9 +4,9 @@ import { lastNDays, type SourceKey } from "@/integrations/types";
 import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
 import { fetchYandexMetrika } from "@/integrations/yandex-metrika";
 import { fetchVkAdsSpend } from "@/integrations/vk-ads";
-import { fetchFitbaseClients, fetchFitbaseSales } from "@/integrations/fitbase";
+import { fetchFitbaseClients } from "@/integrations/fitbase";
 
-const { adSpend, webSessions, clients, sales, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, dailyMetrics, syncLog } = schema;
 
 export interface SyncResult {
   source: SourceKey;
@@ -115,25 +115,24 @@ export async function runFullSync(): Promise<SyncResult[]> {
   results.push(await guarded("fitbase", async () => {
     const clientRows = await fetchFitbaseClients(range);
     for (const c of clientRows) {
+      if (!c.fitbaseId) continue;
       await db
         .insert(clients)
         .values(c)
         .onConflictDoUpdate({
           target: [clients.fitbaseId],
-          set: { name: c.name, phone: c.phone, utmSource: c.utmSource, utmMedium: c.utmMedium, utmCampaign: c.utmCampaign, updatedAt: new Date() },
+          set: {
+            name: c.name,
+            phone: c.phone,
+            createdAt: c.createdAt,
+            utmSource: c.utmSource,
+            utmMedium: c.utmMedium,
+            utmCampaign: c.utmCampaign,
+            updatedAt: new Date(),
+          },
         });
     }
-    const saleRows = await fetchFitbaseSales(range);
-    for (const s of saleRows) {
-      await db
-        .insert(sales)
-        .values({ ...s, amount: String(s.amount) })
-        .onConflictDoUpdate({
-          target: [sales.fitbaseId],
-          set: { amount: String(s.amount), product: s.product, date: s.date, updatedAt: new Date() },
-        });
-    }
-    return clientRows.length + saleRows.length;
+    return clientRows.length;
   }));
 
   // После загрузки сырья — пересчитываем витрину.

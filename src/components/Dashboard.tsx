@@ -27,6 +27,7 @@ interface Totals {
   leads: number;
   sales_count: number;
   revenue: number;
+  new_clients: number;
 }
 interface SourceRow {
   source: string;
@@ -135,7 +136,7 @@ export default function Dashboard() {
             <Kpi label="Расход" value={rub(t.cost)} />
             <Kpi label="Клики" value={num(t.clicks)} />
             <Kpi label="Лиды" value={num(t.leads)} />
-            <Kpi label="Продажи" value={num(t.sales_count)} />
+            <Kpi label="Новые клиенты" value={num(t.new_clients)} />
             <Kpi label="Выручка" value={rub(t.revenue)} />
             <Kpi label="ROMI" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
           </div>
