@@ -94,13 +94,21 @@
 
   // 3) Автоперехват форм: ищем телефон в отправляемой форме.
   function findPhone(form) {
-    var inputs = form.querySelectorAll("input");
+    var inputs = form.querySelectorAll("input, textarea");
+    // 1) Явный телефон: тип tel / inputmode tel / подсказки в атрибутах.
     for (var i = 0; i < inputs.length; i++) {
       var el = inputs[i];
-      var hint = ((el.type || "") + " " + (el.name || "") + " " + (el.id || "") + " " + (el.getAttribute("autocomplete") || "")).toLowerCase();
-      if (el.type === "tel" || /phone|tel|телефон|nomer|номер/.test(hint)) {
-        if (el.value && el.value.replace(/\D/g, "").length >= 10) return el.value;
-      }
+      var hint = [el.type, el.name, el.id, el.getAttribute("autocomplete"), el.getAttribute("inputmode"), el.placeholder, el.getAttribute("aria-label")]
+        .join(" ")
+        .toLowerCase();
+      var isTel = el.type === "tel" || el.getAttribute("inputmode") === "tel" || /phone|tel|телефон|nomer|номер|моб/.test(hint);
+      if (isTel && el.value && el.value.replace(/\D/g, "").length >= 10) return el.value;
+    }
+    // 2) Запасной вариант: единственное поле, чьё значение похоже на телефон.
+    for (var j = 0; j < inputs.length; j++) {
+      var v = inputs[j].value || "";
+      var digits = v.replace(/\D/g, "");
+      if (digits.length >= 10 && digits.length <= 15 && /[\d\s()+-]{10,}/.test(v)) return v;
     }
     return null;
   }
