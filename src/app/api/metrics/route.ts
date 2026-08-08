@@ -60,11 +60,15 @@ export async function GET(req: Request) {
     WHERE created_at >= CURRENT_DATE - ${days}::int
   `);
 
+  // Последний статус по каждому источнику (по одной строке на источник).
   const lastSync = await db.execute(sql`
-    SELECT source, status, rows_upserted, message, finished_at
-    FROM sync_log
+    SELECT * FROM (
+      SELECT DISTINCT ON (source)
+        source, status, rows_upserted, message, finished_at
+      FROM sync_log
+      ORDER BY source, finished_at DESC NULLS LAST
+    ) t
     ORDER BY finished_at DESC NULLS LAST
-    LIMIT 5
   `);
 
   return NextResponse.json({

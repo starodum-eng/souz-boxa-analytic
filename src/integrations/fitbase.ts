@@ -19,8 +19,8 @@ import type { ClientRow, DateRange } from "./types";
  */
 
 const DEFAULT_BASE_URL = "https://api.fitbase.io/api/v2";
-const PAGE_SIZE = 200;
-const MAX_PAGES = 100; // предохранитель
+const PAGE_SIZE = 100; // максимум, который принимает Fitbase (иначе Validation error)
+const MAX_PAGES = 200; // предохранитель (100 × 200 = 20000 клиентов)
 
 function authHeaders(): Record<string, string> {
   const key = process.env.FITBASE_API_KEY;
