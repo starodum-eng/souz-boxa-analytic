@@ -163,3 +163,31 @@ export const syncLog = pgTable("sync_log", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
+
+/**
+ * Касания-обращения из Callibri (коллтрекинг + формы + чаты).
+ * Это «мост» атрибуции: телефон ↔ рекламный источник. Джойнится с клиентами
+ * Fitbase по нормализованному телефону (последние 10 цифр) для сквозной аналитики.
+ */
+export const leadTouches = pgTable(
+  "lead_touches",
+  {
+    id: serial("id").primaryKey(),
+    externalId: varchar("external_id", { length: 128 }).notNull(), // id обращения в Callibri
+    channel: varchar("channel", { length: 32 }), // call | form | chat | other
+    phoneNorm: varchar("phone_norm", { length: 16 }), // последние 10 цифр — ключ склейки
+    phoneRaw: varchar("phone_raw", { length: 64 }),
+    utmSource: varchar("utm_source", { length: 256 }),
+    utmMedium: varchar("utm_medium", { length: 256 }),
+    utmCampaign: varchar("utm_campaign", { length: 256 }),
+    channelName: varchar("channel_name", { length: 256 }), // человекочитаемый канал Callibri
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("lead_touches_external_uniq").on(t.externalId),
+    index("lead_touches_phone_idx").on(t.phoneNorm),
+    index("lead_touches_created_idx").on(t.createdAt),
+  ],
+);
