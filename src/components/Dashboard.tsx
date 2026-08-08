@@ -12,7 +12,13 @@ import {
   Legend,
 } from "recharts";
 import { rub, num, pct, SOURCE_LABEL } from "@/lib/format";
-import { syncNow } from "@/app/actions";
+
+interface SyncResult {
+  source: string;
+  status: string;
+  rows: number;
+  message?: string;
+}
 
 interface Totals {
   cost: number;
@@ -80,7 +86,9 @@ export default function Dashboard() {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const results = await syncNow();
+      const res = await fetch("/api/sync-now", { method: "POST" });
+      const body = (await res.json()) as { results: SyncResult[] };
+      const results = body.results ?? [];
       const ok = results.filter((r) => r.status === "ok");
       const fail = results.filter((r) => r.status !== "ok");
       setSyncMsg(
