@@ -8,16 +8,18 @@ import type { ClientRow, DateRange } from "./types";
  *   Authorization: Bearer <token>
  *   domain: <домен клуба>            (напр. soyuz-boksa)
  *
- * В доступе есть /client, /user, /schedule, /schedule-registration, /place.
  * Эндпоинта продаж/платежей нет, поэтому из Fitbase берём «дно воронки»
  * на уровне CRM — новых клиентов (регистрации в клубе).
  *
- * Пагинация — стандартная Yii2 REST: параметры page / per-page,
- * заголовки X-Pagination-Page-Count и т.п. Тело ответа — массив объектов.
+ * Структура ответа /client (по факту):
+ *   { data: [ {id, name, surname, patronymic, created_at(unix sec),
+ *              contacts:[{contact_type:"phone", contact:"79..."}], ... } ],
+ *     page, page_size, count, total_count }
+ *   UTM-меток в карточке нет — атрибуция по каналам недоступна.
  */
 
 const DEFAULT_BASE_URL = "https://api.fitbase.io/api/v2";
-const PER_PAGE = 200;
+const PAGE_SIZE = 200;
 const MAX_PAGES = 100; // предохранитель
 
 function authHeaders(): Record<string, string> {
@@ -25,80 +27,83 @@ function authHeaders(): Record<string, string> {
   const domain = process.env.FITBASE_DOMAIN;
   if (!key) throw new Error("FITBASE_API_KEY is not set");
   if (!domain) throw new Error("FITBASE_DOMAIN is not set");
-  return {
-    Authorization: `Bearer ${key}`,
-    domain,
-    Accept: "application/json",
-  };
+  return { Authorization: `Bearer ${key}`, domain, Accept: "application/json" };
 }
 
 function baseUrl(): string {
   return (process.env.FITBASE_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
 }
 
-/** Достаёт массив записей из тела ответа (Yii2 может отдавать массив или обёртку). */
+/** Массив клиентов: под известными ключами или первый массив в объекте-обёртке. */
 function extractItems(json: unknown): any[] {
   if (Array.isArray(json)) return json;
   if (json && typeof json === "object") {
     const o = json as Record<string, unknown>;
-    if (Array.isArray(o.items)) return o.items as any[];
     if (Array.isArray(o.data)) return o.data as any[];
+    if (Array.isArray(o.items)) return o.items as any[];
+    for (const v of Object.values(o)) {
+      if (Array.isArray(v) && v.length && typeof v[0] === "object") return v as any[];
+    }
   }
   return [];
 }
 
-/** Берёт первое непустое значение из набора возможных имён полей. */
-function pick(obj: any, keys: string[]): any {
-  for (const k of keys) {
-    if (obj[k] != null && obj[k] !== "") return obj[k];
+/** Unix-секунды/миллисекунды или ISO-строку → Date (или null). */
+function toDate(v: unknown): Date | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" || /^\d+$/.test(String(v))) {
+    const n = Number(v);
+    // < 1e11 считаем секундами, иначе миллисекундами
+    const ms = n < 1e11 ? n * 1000 : n;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
   }
-  return null;
+  const d = new Date(String(v));
+  return isNaN(d.getTime()) ? null : d;
 }
 
-export async function fetchFitbaseClients(range: DateRange): Promise<ClientRow[]> {
+function extractPhone(c: any): string | null {
+  const contacts = Array.isArray(c.contacts) ? c.contacts : [];
+  const phone = contacts.find((x: any) => x?.contact_type === "phone") ?? contacts[0];
+  return phone?.contact ?? c.phone ?? null;
+}
+
+function fullName(c: any): string | null {
+  const parts = [c.surname, c.name, c.patronymic].filter((p) => p && String(p).trim() && p !== "-");
+  return parts.length ? parts.join(" ") : (c.name ?? null);
+}
+
+export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[]> {
   const headers = authHeaders();
   const out: ClientRow[] = [];
 
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = `${baseUrl()}/client?per-page=${PER_PAGE}&page=${page}`;
+    const url = `${baseUrl()}/client?page=${page}&page_size=${PAGE_SIZE}`;
     const res = await fetch(url, { headers });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Fitbase /client error ${res.status}: ${text.slice(0, 300)}`);
     }
-    const json = await res.json();
+    const json = (await res.json()) as Record<string, unknown>;
     const items = extractItems(json);
     if (items.length === 0) break;
 
     for (const c of items) {
-      const createdRaw = pick(c, [
-        "created_at",
-        "createdAt",
-        "dateCreate",
-        "date_create",
-        "createDate",
-        "registration_date",
-        "created",
-        "date",
-      ]);
-      const created = createdRaw ? new Date(createdRaw) : null;
       out.push({
-        fitbaseId: String(pick(c, ["id", "clientId", "client_id"]) ?? ""),
-        name: pick(c, ["name", "fio", "fullName", "full_name"]),
-        phone: pick(c, ["phone", "phoneNumber", "phone_number"]),
-        // UTM в карточке клиента может отсутствовать — тогда атрибуция по каналам недоступна.
-        utmSource: pick(c, ["utm_source", "utmSource"]),
-        utmMedium: pick(c, ["utm_medium", "utmMedium"]),
-        utmCampaign: pick(c, ["utm_campaign", "utmCampaign"]),
-        createdAt: created && !isNaN(created.getTime()) ? created : null,
+        fitbaseId: String(c.id ?? ""),
+        name: fullName(c),
+        phone: extractPhone(c),
+        utmSource: null,
+        utmMedium: null,
+        utmCampaign: null,
+        createdAt: toDate(c.created_at),
         raw: c,
       });
     }
 
-    // Yii2 отдаёт общее число страниц в заголовке; если он есть — используем его.
-    const pageCount = Number(res.headers.get("x-pagination-page-count"));
-    if (pageCount && page >= pageCount) break;
-    if (items.length < PER_PAGE) break;
+    const total = Number(json.total_count) || 0;
+    if (total && page * PAGE_SIZE >= total) break;
+    if (items.length < PAGE_SIZE) break;
   }
 
   return out;

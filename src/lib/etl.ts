@@ -113,21 +113,21 @@ export async function runFullSync(): Promise<SyncResult[]> {
   }));
 
   results.push(await guarded("fitbase", async () => {
-    const clientRows = await fetchFitbaseClients(range);
-    for (const c of clientRows) {
-      if (!c.fitbaseId) continue;
+    const clientRows = (await fetchFitbaseClients(range)).filter((c) => c.fitbaseId);
+    // Пакетная вставка: neon-http делает по HTTP-запросу на каждый вызов,
+    // поэтому вставляем чанками, а не по одной строке (иначе тысячи round-trip).
+    const CHUNK = 500;
+    for (let i = 0; i < clientRows.length; i += CHUNK) {
+      const batch = clientRows.slice(i, i + CHUNK);
       await db
         .insert(clients)
-        .values(c)
+        .values(batch)
         .onConflictDoUpdate({
           target: [clients.fitbaseId],
           set: {
-            name: c.name,
-            phone: c.phone,
-            createdAt: c.createdAt,
-            utmSource: c.utmSource,
-            utmMedium: c.utmMedium,
-            utmCampaign: c.utmCampaign,
+            name: sql`excluded.name`,
+            phone: sql`excluded.phone`,
+            createdAt: sql`excluded.created_at`,
             updatedAt: new Date(),
           },
         });
