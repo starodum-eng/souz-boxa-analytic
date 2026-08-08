@@ -76,7 +76,7 @@ export default function Dashboard() {
       <div className="header">
         <div>
           <h1>Союз-Бокса · Сквозная аналитика</h1>
-          <div className="sub">Реклама → визиты → лиды → продажи. Данные обновляются каждые 3 часа.</div>
+          <div className="sub">Реклама → визиты → лиды → продажи. Данные обновляются раз в сутки.</div>
         </div>
         <div className="controls">
           {RANGES.map((r) => (
