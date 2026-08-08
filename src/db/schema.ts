@@ -22,7 +22,9 @@ export const sourceEnum = pgEnum("source", [
   "yandex_business",
   "vk_ads",
   "fitbase",
-  "site", // органика/прямой трафик (веб-сессии без рекламных UTM)
+  "site", // прочий небрендовый трафик без UTM (реферальный/соцсети и т.п.)
+  "seo", // органический поиск (lastTrafficSource = organic)
+  "direct", // прямые заходы (lastTrafficSource = direct)
 ]);
 
 /**
@@ -61,9 +63,12 @@ export const webSessions = pgTable(
   {
     id: serial("id").primaryKey(),
     date: date("date").notNull(),
-    utmSource: varchar("utm_source", { length: 256 }),
-    utmMedium: varchar("utm_medium", { length: 256 }),
-    utmCampaign: varchar("utm_campaign", { length: 256 }),
+    // Пустые значения храним как '' (не NULL), чтобы уникальный индекс дедуплицировал
+    // органику/прямые заходы (у них нет UTM) при повторной синхронизации.
+    utmSource: varchar("utm_source", { length: 256 }).notNull().default(""),
+    utmMedium: varchar("utm_medium", { length: 256 }).notNull().default(""),
+    utmCampaign: varchar("utm_campaign", { length: 256 }).notNull().default(""),
+    trafficSource: varchar("traffic_source", { length: 64 }).notNull().default(""),
     visits: integer("visits").notNull().default(0),
     users: integer("users").notNull().default(0),
     bounces: integer("bounces").notNull().default(0),
@@ -72,7 +77,7 @@ export const webSessions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex("web_sessions_uniq").on(t.date, t.utmSource, t.utmMedium, t.utmCampaign),
+    uniqueIndex("web_sessions_uniq").on(t.date, t.utmSource, t.utmMedium, t.utmCampaign, t.trafficSource),
     index("web_sessions_date_idx").on(t.date),
   ],
 );

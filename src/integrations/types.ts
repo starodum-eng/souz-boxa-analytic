@@ -22,9 +22,10 @@ export interface AdSpendRow {
 
 export interface WebSessionRow {
   date: string;
-  utmSource: string | null;
-  utmMedium: string | null;
-  utmCampaign: string | null;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  trafficSource: string; // тип источника трафика Метрики: organic | direct | ad | ...
   visits: number;
   users: number;
   bounces: number;

@@ -28,7 +28,9 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
     ids: counterId,
     date1: range.from,
     date2: range.to,
-    dimensions: "ym:s:date,ym:s:UTMSource,ym:s:UTMMedium,ym:s:UTMCampaign",
+    // lastTrafficSource — тип источника (organic/direct/ad/referral/social/…),
+    // нужен для разделения SEO и прямых заходов (UTM у них нет).
+    dimensions: "ym:s:date,ym:s:UTMSource,ym:s:UTMMedium,ym:s:UTMCampaign,ym:s:lastTrafficSource",
     metrics: metrics.join(","),
     limit: "100000",
     accuracy: "full",
@@ -44,20 +46,22 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
   }
 
   const json = (await res.json()) as {
-    data: Array<{ dimensions: Array<{ name: string }>; metrics: number[] }>;
+    data: Array<{ dimensions: Array<{ id?: string | null; name: string | null }>; metrics: number[] }>;
   };
 
   return json.data.map((row) => {
-    const [dateDim, sourceDim, mediumDim, campaignDim] = row.dimensions;
+    const [dateDim, sourceDim, mediumDim, campaignDim, trafficDim] = row.dimensions;
     const [visits, users, bounceRate] = row.metrics;
     // goalReaches идёт 4-м элементом только если задан goalId; иначе его нет.
     const goalReaches = goalId ? row.metrics[3] : 0;
     const visitsN = Number(visits) || 0;
     return {
-      date: dateDim.name,
-      utmSource: sourceDim.name || null,
-      utmMedium: mediumDim.name || null,
-      utmCampaign: campaignDim.name || null,
+      date: dateDim.name ?? "",
+      utmSource: sourceDim.name || "",
+      utmMedium: mediumDim.name || "",
+      utmCampaign: campaignDim.name || "",
+      // у типа трафика код лежит в id (organic/direct/…), name — локализованная подпись
+      trafficSource: trafficDim?.id || trafficDim?.name || "",
       visits: visitsN,
       users: Number(users) || 0,
       // bounceRate — процент; переводим в абсолютное число отказов

@@ -92,6 +92,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
           utmSource: r.utmSource,
           utmMedium: r.utmMedium,
           utmCampaign: r.utmCampaign,
+          trafficSource: r.trafficSource,
           visits: r.visits,
           users: r.users,
           bounces: r.bounces,
@@ -99,7 +100,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
           raw: r.raw,
         })
         .onConflictDoUpdate({
-          target: [webSessions.date, webSessions.utmSource, webSessions.utmMedium, webSessions.utmCampaign],
+          target: [webSessions.date, webSessions.utmSource, webSessions.utmMedium, webSessions.utmCampaign, webSessions.trafficSource],
           set: {
             visits: r.visits,
             users: r.users,
@@ -190,6 +191,8 @@ export async function recomputeDailyMetrics(): Promise<void> {
         CASE
           WHEN lower(coalesce(utm_source,'')) LIKE '%yandex%' OR lower(coalesce(utm_source,'')) LIKE '%direct%' THEN 'yandex_direct'
           WHEN lower(coalesce(utm_source,'')) LIKE '%vk%' THEN 'vk_ads'
+          WHEN lower(coalesce(traffic_source,'')) = 'organic' THEN 'seo'
+          WHEN lower(coalesce(traffic_source,'')) = 'direct' THEN 'direct'
           ELSE 'site'
         END::source AS source,
         SUM(visits) AS visits,
