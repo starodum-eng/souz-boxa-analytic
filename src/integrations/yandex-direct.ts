@@ -70,7 +70,16 @@ export async function fetchYandexDirectSpend(range: DateRange): Promise<AdSpendR
 }
 
 function parseTsv(tsv: string): AdSpendRow[] {
-  const lines = tsv.trim().split("\n").filter(Boolean);
+  const lines = tsv
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    // Отбрасываем строку с названиями колонок (Date\tCampaignId\t...),
+    // которую TSV Директа отдаёт помимо данных, и строку "Total".
+    .filter((line) => {
+      const first = line.split("\t")[0];
+      return first !== "Date" && first !== "Total";
+    });
   return lines.map((line) => {
     const [date, campaignId, campaignName, impressions, clicks, cost] = line.split("\t");
     return {
