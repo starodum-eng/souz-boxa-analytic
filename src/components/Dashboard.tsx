@@ -1,0 +1,213 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
+} from "recharts";
+import { rub, num, pct, SOURCE_LABEL } from "@/lib/format";
+
+interface Totals {
+  cost: number;
+  clicks: number;
+  visits: number;
+  leads: number;
+  sales_count: number;
+  revenue: number;
+}
+interface SourceRow {
+  source: string;
+  cost: number;
+  leads: number;
+  sales_count: number;
+  revenue: number;
+  cpl: number | null;
+  cac: number | null;
+  romi: number | null;
+}
+interface TimePoint {
+  date: string;
+  cost: number;
+  leads: number;
+  revenue: number;
+}
+interface SyncRow {
+  source: string;
+  status: string;
+  rows_upserted: number;
+  message: string | null;
+  finished_at: string | null;
+}
+
+interface Data {
+  totals: Totals;
+  bySource: SourceRow[];
+  timeline: TimePoint[];
+  lastSync: SyncRow[];
+}
+
+const RANGES = [7, 30, 90];
+
+export default function Dashboard() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    fetch(`/api/metrics?days=${days}`)
+      .then((r) => r.json())
+      .then(setData)
+      .catch((e) => setError(String(e)));
+  }, [days]);
+
+  const t = data?.totals;
+  const romi = t && Number(t.cost) > 0 ? (Number(t.revenue) - Number(t.cost)) / Number(t.cost) : null;
+
+  return (
+    <div className="container">
+      <div className="header">
+        <div>
+          <h1>Союз-Бокса · Сквозная аналитика</h1>
+          <div className="sub">Реклама → визиты → лиды → продажи. Данные обновляются каждые 3 часа.</div>
+        </div>
+        <div className="controls">
+          {RANGES.map((r) => (
+            <button key={r} className={r === days ? "active" : ""} onClick={() => setDays(r)}>
+              {r} дн.
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <div className="card neg">Ошибка загрузки: {error}</div>}
+      {!data && !error && <div className="card muted">Загрузка…</div>}
+
+      {data && t && (
+        <>
+          <div className="kpis">
+            <Kpi label="Расход" value={rub(t.cost)} />
+            <Kpi label="Клики" value={num(t.clicks)} />
+            <Kpi label="Лиды" value={num(t.leads)} />
+            <Kpi label="Продажи" value={num(t.sales_count)} />
+            <Kpi label="Выручка" value={rub(t.revenue)} />
+            <Kpi label="ROMI" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
+          </div>
+
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>Динамика</div>
+            <div className="chart-wrap">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={data.timeline}>
+                  <CartesianGrid stroke="#262d3a" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" stroke="#8a93a6" fontSize={12} />
+                  <YAxis stroke="#8a93a6" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{ background: "#141922", border: "1px solid #262d3a", borderRadius: 8 }}
+                    formatter={(v: number, name) =>
+                      name === "Лиды" ? num(v) : rub(v)
+                    }
+                  />
+                  <Legend />
+                  <Line type="monotone" dataKey="cost" name="Расход" stroke="#e23b3b" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="revenue" name="Выручка" stroke="#2ecc71" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="leads" name="Лиды" stroke="#4d9fff" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="section-title">По источникам</div>
+          <div className="card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Источник</th>
+                  <th>Расход</th>
+                  <th>Лиды</th>
+                  <th>CPL</th>
+                  <th>Продажи</th>
+                  <th>CAC</th>
+                  <th>Выручка</th>
+                  <th>ROMI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.bySource.map((s) => (
+                  <tr key={s.source}>
+                    <td>{SOURCE_LABEL[s.source] ?? s.source}</td>
+                    <td>{rub(s.cost)}</td>
+                    <td>{num(s.leads)}</td>
+                    <td>{s.cpl != null ? rub(s.cpl) : "—"}</td>
+                    <td>{num(s.sales_count)}</td>
+                    <td>{s.cac != null ? rub(s.cac) : "—"}</td>
+                    <td>{rub(s.revenue)}</td>
+                    <td className={s.romi != null ? (Number(s.romi) >= 0 ? "pos" : "neg") : "muted"}>
+                      {pct(s.romi)}
+                    </td>
+                  </tr>
+                ))}
+                {data.bySource.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="section-title">Статус синхронизации</div>
+          <div className="card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Источник</th>
+                  <th>Статус</th>
+                  <th>Строк</th>
+                  <th>Когда</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.lastSync.map((s, i) => (
+                  <tr key={i}>
+                    <td>{SOURCE_LABEL[s.source] ?? s.source}</td>
+                    <td>
+                      <span className={`badge ${s.status === "ok" ? "ok" : "error"}`}>
+                        {s.status === "ok" ? "ok" : "ошибка"}
+                      </span>
+                    </td>
+                    <td>{num(s.rows_upserted)}</td>
+                    <td className="muted">
+                      {s.finished_at ? new Date(s.finished_at).toLocaleString("ru-RU") : "—"}
+                    </td>
+                  </tr>
+                ))}
+                {data.lastSync.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="muted">Синхронизаций ещё не было.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Kpi({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="card kpi">
+      <div className="label">{label}</div>
+      <div className={`value ${className ?? ""}`}>{value}</div>
+    </div>
+  );
+}
