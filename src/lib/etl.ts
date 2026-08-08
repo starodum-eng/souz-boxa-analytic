@@ -180,8 +180,9 @@ export async function recomputeDailyMetrics(): Promise<void> {
     GROUP BY s.date, s.source
   `);
 
-  // 2) Визиты и достижения целей из Метрики, разложенные по каналам (utm_medium → источник).
-  //    cpc/cpm-трафик Директа: utm_source ~ 'yandex', VK: utm_source ~ 'vk'.
+  // 2) Визиты и достижения целей из Метрики, разложенные по каналам.
+  //    Платный Директ: utm_source ~ 'yandex'; VK: utm_source ~ 'vk';
+  //    остальное (органика/прямой/реферальный трафик) → источник 'site'.
   await db.execute(sql`
     WITH web AS (
       SELECT
@@ -189,17 +190,17 @@ export async function recomputeDailyMetrics(): Promise<void> {
         CASE
           WHEN lower(coalesce(utm_source,'')) LIKE '%yandex%' OR lower(coalesce(utm_source,'')) LIKE '%direct%' THEN 'yandex_direct'
           WHEN lower(coalesce(utm_source,'')) LIKE '%vk%' THEN 'vk_ads'
-          ELSE NULL
+          ELSE 'site'
         END::source AS source,
         SUM(visits) AS visits,
         SUM(goal_reaches) AS leads
       FROM web_sessions
       GROUP BY 1, 2
     )
-    UPDATE daily_metrics dm
-    SET visits = web.visits, leads = web.leads
-    FROM web
-    WHERE web.source IS NOT NULL AND dm.date = web.date AND dm.source = web.source
+    INSERT INTO daily_metrics (date, source, visits, leads)
+    SELECT date, source, visits, leads FROM web
+    ON CONFLICT (date, source) DO UPDATE
+      SET visits = EXCLUDED.visits, leads = EXCLUDED.leads
   `);
 
   // 3) Продажи Fitbase, разнесённые по каналам через utm_source.

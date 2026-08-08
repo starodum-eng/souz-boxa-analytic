@@ -22,6 +22,7 @@ export const sourceEnum = pgEnum("source", [
   "yandex_business",
   "vk_ads",
   "fitbase",
+  "site", // органика/прямой трафик (веб-сессии без рекламных UTM)
 ]);
 
 /**

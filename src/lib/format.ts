@@ -15,4 +15,5 @@ export const SOURCE_LABEL: Record<string, string> = {
   yandex_business: "Яндекс.Бизнес",
   vk_ads: "VK Реклама",
   fitbase: "Fitbase",
+  site: "Сайт (органика)",
 };
