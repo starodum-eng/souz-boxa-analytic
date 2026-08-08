@@ -13,15 +13,22 @@ const API_URL = "https://api-metrika.yandex.net/stat/v1/data";
 export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRow[]> {
   const token = process.env.YANDEX_METRIKA_TOKEN;
   const counterId = process.env.YANDEX_METRIKA_COUNTER_ID;
+  // ID цели в Метрике, которую считаем «лидом» (напр. отправка формы заявки).
+  // У Метрики нет общей метрики достижений — только по конкретной цели:
+  // ym:s:goal<ID>reaches. Если не задан — грузим визиты, лиды = 0.
+  const goalId = process.env.YANDEX_METRIKA_GOAL_ID?.trim();
   if (!token) throw new Error("YANDEX_METRIKA_TOKEN is not set");
   if (!counterId) throw new Error("YANDEX_METRIKA_COUNTER_ID is not set");
+
+  const metrics = ["ym:s:visits", "ym:s:users", "ym:s:bounceRate"];
+  if (goalId) metrics.push(`ym:s:goal${goalId}reaches`);
 
   const params = new URLSearchParams({
     ids: counterId,
     date1: range.from,
     date2: range.to,
     dimensions: "ym:s:date,ym:s:UTMSource,ym:s:UTMMedium,ym:s:UTMCampaign",
-    metrics: "ym:s:visits,ym:s:users,ym:s:bounceRate,ym:s:goalReaches",
+    metrics: metrics.join(","),
     limit: "100000",
     accuracy: "full",
   });
@@ -41,7 +48,9 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
 
   return json.data.map((row) => {
     const [dateDim, sourceDim, mediumDim, campaignDim] = row.dimensions;
-    const [visits, users, bounceRate, goalReaches] = row.metrics;
+    const [visits, users, bounceRate] = row.metrics;
+    // goalReaches идёт 4-м элементом только если задан goalId; иначе его нет.
+    const goalReaches = goalId ? row.metrics[3] : 0;
     const visitsN = Number(visits) || 0;
     return {
       date: dateDim.name,
