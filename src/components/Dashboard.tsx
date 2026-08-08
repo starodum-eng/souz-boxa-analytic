@@ -203,6 +203,7 @@ export default function Dashboard() {
                   <th>Статус</th>
                   <th>Строк</th>
                   <th>Когда</th>
+                  <th>Сообщение</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,11 +219,12 @@ export default function Dashboard() {
                     <td className="muted">
                       {s.finished_at ? new Date(s.finished_at).toLocaleString("ru-RU") : "—"}
                     </td>
+                    <td className="msg" title={s.message ?? ""}>{s.message ?? ""}</td>
                   </tr>
                 ))}
                 {data.lastSync.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="muted">Синхронизаций ещё не было.</td>
+                    <td colSpan={5} className="muted">Синхронизаций ещё не было.</td>
                   </tr>
                 )}
               </tbody>

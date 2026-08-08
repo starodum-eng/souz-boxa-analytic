@@ -117,6 +117,14 @@ th {
 .muted {
   color: var(--muted);
 }
+td.msg {
+  max-width: 420px;
+  white-space: normal;
+  word-break: break-word;
+  color: var(--red);
+  font-size: 12px;
+  text-align: left;
+}
 
 .badge {
   display: inline-block;
