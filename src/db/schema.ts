@@ -128,6 +128,58 @@ export const sales = pgTable(
 );
 
 /**
+ * Лиды из воронки Fitbase (/v2/lead). Несут UTM, этап воронки, источник,
+ * бюджет и client_id — основа атрибуции клиента к каналу прямо из CRM.
+ */
+export const fitbaseLeads = pgTable(
+  "fitbase_leads",
+  {
+    id: serial("id").primaryKey(),
+    fitbaseId: varchar("fitbase_id", { length: 128 }).notNull(),
+    clientId: varchar("client_id", { length: 128 }),
+    phoneNorm: varchar("phone_norm", { length: 16 }),
+    utmSource: varchar("utm_source", { length: 256 }),
+    utmMedium: varchar("utm_medium", { length: 256 }),
+    utmCampaign: varchar("utm_campaign", { length: 256 }),
+    advertisingSource: varchar("advertising_source", { length: 256 }),
+    funnelStep: varchar("funnel_step", { length: 256 }),
+    budget: numeric("budget", { precision: 14, scale: 2 }).notNull().default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitbase_leads_uniq").on(t.fitbaseId),
+    index("fitbase_leads_client_idx").on(t.clientId),
+    index("fitbase_leads_created_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * Абонементы клиентов Fitbase (/v2/client-contract) — деньги.
+ * Сумма оплат по клиенту = его LTV.
+ */
+export const clientContracts = pgTable(
+  "client_contracts",
+  {
+    id: serial("id").primaryKey(),
+    fitbaseId: varchar("fitbase_id", { length: 128 }).notNull(),
+    clientId: varchar("client_id", { length: 128 }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    paid: integer("paid").notNull().default(0),
+    beginDate: timestamp("begin_date", { withTimezone: true }),
+    endDate: timestamp("end_date", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("client_contracts_uniq").on(t.fitbaseId),
+    index("client_contracts_client_idx").on(t.clientId),
+  ],
+);
+
+/**
  * Витрина: агрегат по дню × источнику для быстрого чтения дашбордом.
  * Пересчитывается ETL-оркестратором после загрузки сырых данных.
  * Хранит и абсолютные метрики, и производные (CPL, CAC, ROMI).

@@ -56,6 +56,33 @@ export interface SaleRow {
   raw?: unknown;
 }
 
+/** Лид из воронки Fitbase (/v2/lead) — атрибуция канала + этап. */
+export interface FitbaseLeadRow {
+  fitbaseId: string;
+  clientId: string | null;
+  phoneNorm: string | null;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  advertisingSource: string | null; // Сайт/Звонок/Трафик (справочник Fitbase)
+  funnelStep: string | null;
+  budget: number;
+  createdAt: Date | null;
+  raw?: unknown;
+}
+
+/** Абонемент клиента Fitbase (/v2/client-contract) — деньги/LTV. */
+export interface FitbaseContractRow {
+  fitbaseId: string;
+  clientId: string | null;
+  amount: number; // сумма оплаты
+  paid: boolean;
+  beginDate: Date | null;
+  endDate: Date | null;
+  createdAt: Date | null;
+  raw?: unknown;
+}
+
 export type SourceKey =
   | "yandex_direct"
   | "yandex_metrika"

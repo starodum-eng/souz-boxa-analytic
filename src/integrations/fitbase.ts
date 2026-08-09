@@ -1,4 +1,5 @@
-import type { ClientRow, DateRange } from "./types";
+import type { ClientRow, DateRange, FitbaseLeadRow, FitbaseContractRow } from "./types";
+import { normalizePhone } from "@/lib/phone";
 
 /**
  * Fitbase — CRM спортивных клубов. API v2.
@@ -73,38 +74,78 @@ function fullName(c: any): string | null {
   return parts.length ? parts.join(" ") : (c.name ?? null);
 }
 
-export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[]> {
+/** Универсальная постраничная выгрузка всех записей эндпоинта Fitbase. */
+async function fetchAllPages(path: string, endpointName: string): Promise<any[]> {
   const headers = authHeaders();
-  const out: ClientRow[] = [];
-
+  const out: any[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = `${baseUrl()}/client?page=${page}&page_size=${PAGE_SIZE}`;
+    const sep = path.includes("?") ? "&" : "?";
+    const url = `${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`;
     const res = await fetch(url, { headers });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Fitbase /client error ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`Fitbase ${endpointName} error ${res.status}: ${text.slice(0, 300)}`);
     }
     const json = (await res.json()) as Record<string, unknown>;
     const items = extractItems(json);
     if (items.length === 0) break;
-
-    for (const c of items) {
-      out.push({
-        fitbaseId: String(c.id ?? ""),
-        name: fullName(c),
-        phone: extractPhone(c),
-        utmSource: null,
-        utmMedium: null,
-        utmCampaign: null,
-        createdAt: toDate(c.created_at),
-        raw: c,
-      });
-    }
-
+    out.push(...items);
     const total = Number(json.total_count) || 0;
     if (total && page * PAGE_SIZE >= total) break;
     if (items.length < PAGE_SIZE) break;
   }
-
   return out;
+}
+
+export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[]> {
+  const items = await fetchAllPages("/client", "/client");
+  return items.map((c) => ({
+    fitbaseId: String(c.id ?? ""),
+    name: fullName(c),
+    phone: extractPhone(c),
+    utmSource: null,
+    utmMedium: null,
+    utmCampaign: null,
+    createdAt: toDate(c.created_at),
+    raw: c,
+  }));
+}
+
+/** Лиды из воронки (/v2/lead) — с UTM, этапом, источником, бюджетом, client_id. */
+export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadRow[]> {
+  const items = await fetchAllPages("/lead", "/lead");
+  return items.map((l) => ({
+    fitbaseId: String(l.id ?? ""),
+    clientId: l.client_id != null ? String(l.client_id) : null,
+    phoneNorm: normalizePhone(l.phone),
+    utmSource: l.utm_source ?? null,
+    utmMedium: l.utm_medium ?? null,
+    utmCampaign: l.utm_campaign ?? null,
+    // advertising_source — объект {id,name} или строка
+    advertisingSource:
+      (l.advertising_source && typeof l.advertising_source === "object"
+        ? l.advertising_source.name
+        : l.advertising_source) ?? null,
+    funnelStep:
+      l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
+    budget: Number(l.budget) || 0,
+    createdAt: toDate(l.created_at),
+    raw: l,
+  }));
+}
+
+/** Абонементы (/v2/client-contract) — суммы оплат = LTV. */
+export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseContractRow[]> {
+  const items = await fetchAllPages("/client-contract", "/client-contract");
+  return items.map((c) => ({
+    fitbaseId: String(c.id ?? ""),
+    clientId: c.client_id != null ? String(c.client_id) : null,
+    // сумма фактической оплаты; если её нет — цена
+    amount: Number(c.amount_of_payment ?? c.price ?? 0) || 0,
+    paid: Boolean(c.payment),
+    beginDate: toDate(c.begin_date),
+    endDate: toDate(c.end_date),
+    createdAt: toDate(c.created_at),
+    raw: c,
+  }));
 }

@@ -4,9 +4,9 @@ import { lastNDays, type SourceKey } from "@/integrations/types";
 import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
 import { fetchYandexMetrika } from "@/integrations/yandex-metrika";
 import { fetchVkAdsSpend } from "@/integrations/vk-ads";
-import { fetchFitbaseClients } from "@/integrations/fitbase";
+import { fetchFitbaseClients, fetchFitbaseLeads, fetchFitbaseContracts } from "@/integrations/fitbase";
 
-const { adSpend, webSessions, clients, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, dailyMetrics, syncLog } = schema;
 
 export interface SyncResult {
   source: SourceKey;
@@ -133,7 +133,55 @@ export async function runFullSync(): Promise<SyncResult[]> {
           },
         });
     }
-    return clientRows.length;
+
+    // Лиды воронки (атрибуция канала + этап).
+    const leadRows = (await fetchFitbaseLeads(range)).filter((l) => l.fitbaseId);
+    for (let i = 0; i < leadRows.length; i += CHUNK) {
+      const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
+      await db
+        .insert(fitbaseLeads)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [fitbaseLeads.fitbaseId],
+          set: {
+            clientId: sql`excluded.client_id`,
+            phoneNorm: sql`excluded.phone_norm`,
+            utmSource: sql`excluded.utm_source`,
+            utmMedium: sql`excluded.utm_medium`,
+            utmCampaign: sql`excluded.utm_campaign`,
+            advertisingSource: sql`excluded.advertising_source`,
+            funnelStep: sql`excluded.funnel_step`,
+            budget: sql`excluded.budget`,
+            createdAt: sql`excluded.created_at`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    // Абонементы (деньги/LTV).
+    const contractRows = (await fetchFitbaseContracts(range)).filter((c) => c.fitbaseId);
+    for (let i = 0; i < contractRows.length; i += CHUNK) {
+      const batch = contractRows
+        .slice(i, i + CHUNK)
+        .map((c) => ({ ...c, amount: String(c.amount), paid: c.paid ? 1 : 0 }));
+      await db
+        .insert(clientContracts)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [clientContracts.fitbaseId],
+          set: {
+            clientId: sql`excluded.client_id`,
+            amount: sql`excluded.amount`,
+            paid: sql`excluded.paid`,
+            beginDate: sql`excluded.begin_date`,
+            endDate: sql`excluded.end_date`,
+            createdAt: sql`excluded.created_at`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    return clientRows.length + leadRows.length + contractRows.length;
   }));
 
   // После загрузки сырья — пересчитываем витрину.
