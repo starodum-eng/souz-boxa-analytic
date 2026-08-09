@@ -114,7 +114,14 @@ export async function runFullSync(): Promise<SyncResult[]> {
   }));
 
   results.push(await guarded("fitbase", async () => {
-    const clientRows = (await fetchFitbaseClients(range)).filter((c) => c.fitbaseId);
+    // Дедуп по fitbaseId: API может вернуть дубли на стыке страниц, а INSERT ...
+    // ON CONFLICT не может обновить одну строку дважды в одном пакете.
+    const dedupe = <T extends { fitbaseId: string }>(rows: T[]): T[] => {
+      const m = new Map<string, T>();
+      for (const r of rows) m.set(r.fitbaseId, r);
+      return [...m.values()];
+    };
+    const clientRows = dedupe((await fetchFitbaseClients(range)).filter((c) => c.fitbaseId));
     // Пакетная вставка: neon-http делает по HTTP-запросу на каждый вызов,
     // поэтому вставляем чанками, а не по одной строке (иначе тысячи round-trip).
     const CHUNK = 500;
@@ -135,7 +142,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Лиды воронки (атрибуция канала + этап).
-    const leadRows = (await fetchFitbaseLeads(range)).filter((l) => l.fitbaseId);
+    const leadRows = dedupe((await fetchFitbaseLeads(range)).filter((l) => l.fitbaseId));
     for (let i = 0; i < leadRows.length; i += CHUNK) {
       const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
       await db
@@ -159,7 +166,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Абонементы (деньги/LTV).
-    const contractRows = (await fetchFitbaseContracts(range)).filter((c) => c.fitbaseId);
+    const contractRows = dedupe((await fetchFitbaseContracts(range)).filter((c) => c.fitbaseId));
     for (let i = 0; i < contractRows.length; i += CHUNK) {
       const batch = contractRows
         .slice(i, i + CHUNK)
