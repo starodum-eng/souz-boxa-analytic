@@ -41,20 +41,36 @@ export async function GET(req: Request) {
     ORDER BY cost DESC
   `);
 
-  // Сводка по дням за последние 5 дней (те же метрики, что и по источникам).
+  // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
+  // плюс новые клиенты Fitbase по дате регистрации).
   const byDate = await db.execute(sql`
+    WITH dm AS (
+      SELECT date,
+        SUM(cost) AS cost, SUM(leads) AS leads,
+        SUM(sales_count) AS sales_count, SUM(revenue) AS revenue
+      FROM daily_metrics GROUP BY date
+    ),
+    cl AS (
+      SELECT created_at::date AS date, COUNT(*) AS clients
+      FROM clients WHERE created_at IS NOT NULL GROUP BY 1
+    ),
+    dates AS (
+      SELECT date FROM dm UNION SELECT date FROM cl
+    )
     SELECT
-      date,
-      COALESCE(SUM(cost), 0)        AS cost,
-      COALESCE(SUM(leads), 0)       AS leads,
-      COALESCE(SUM(sales_count), 0) AS sales_count,
-      COALESCE(SUM(revenue), 0)     AS revenue,
-      CASE WHEN SUM(leads) > 0 THEN ROUND(SUM(cost)/SUM(leads), 2) END AS cpl,
-      CASE WHEN SUM(sales_count) > 0 THEN ROUND(SUM(cost)/SUM(sales_count), 2) END AS cac,
-      CASE WHEN SUM(cost) > 0 THEN ROUND((SUM(revenue)-SUM(cost))/SUM(cost), 4) END AS romi
-    FROM daily_metrics
-    GROUP BY date
-    ORDER BY date DESC
+      d.date,
+      COALESCE(dm.cost, 0)        AS cost,
+      COALESCE(dm.leads, 0)       AS leads,
+      COALESCE(dm.sales_count, 0) AS sales_count,
+      COALESCE(dm.revenue, 0)     AS revenue,
+      COALESCE(cl.clients, 0)     AS clients,
+      CASE WHEN dm.leads > 0 THEN ROUND(dm.cost/dm.leads, 2) END AS cpl,
+      CASE WHEN dm.sales_count > 0 THEN ROUND(dm.cost/dm.sales_count, 2) END AS cac,
+      CASE WHEN dm.cost > 0 THEN ROUND((dm.revenue-dm.cost)/dm.cost, 4) END AS romi
+    FROM dates d
+    LEFT JOIN dm ON dm.date = d.date
+    LEFT JOIN cl ON cl.date = d.date
+    ORDER BY d.date DESC
     LIMIT 5
   `);
 

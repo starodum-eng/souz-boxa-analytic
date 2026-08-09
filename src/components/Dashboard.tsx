@@ -43,6 +43,7 @@ interface DateRow {
   date: string;
   cost: number;
   leads: number;
+  clients: number;
   sales_count: number;
   revenue: number;
   cpl: number | null;
@@ -147,7 +148,7 @@ export default function Dashboard() {
             <Kpi label="Расход" value={rub(t.cost)} />
             <Kpi label="Клики" value={num(t.clicks)} />
             <Kpi label="Лиды" value={num(t.leads)} />
-            <Kpi label="Новые клиенты" value={num(t.new_clients)} />
+            <Kpi label="Клиенты" value={num(t.new_clients)} />
             <Kpi label="Выручка" value={rub(t.revenue)} />
             <Kpi label="ROMI" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
           </div>
@@ -223,6 +224,7 @@ export default function Dashboard() {
                   <th>Расход</th>
                   <th>Лиды</th>
                   <th>CPL</th>
+                  <th>Клиенты</th>
                   <th>Продажи</th>
                   <th>CAC</th>
                   <th>Выручка</th>
@@ -236,6 +238,7 @@ export default function Dashboard() {
                     <td>{rub(d.cost)}</td>
                     <td>{num(d.leads)}</td>
                     <td>{d.cpl != null ? rub(d.cpl) : "—"}</td>
+                    <td>{num(d.clients)}</td>
                     <td>{num(d.sales_count)}</td>
                     <td>{d.cac != null ? rub(d.cac) : "—"}</td>
                     <td>{rub(d.revenue)}</td>
@@ -246,7 +249,7 @@ export default function Dashboard() {
                 ))}
                 {data.byDate.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted">Нет данных. Запустите синхронизацию.</td>
+                    <td colSpan={9} className="muted">Нет данных. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
