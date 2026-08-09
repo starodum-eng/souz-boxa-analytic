@@ -41,6 +41,23 @@ export async function GET(req: Request) {
     ORDER BY cost DESC
   `);
 
+  // Сводка по дням за последние 5 дней (те же метрики, что и по источникам).
+  const byDate = await db.execute(sql`
+    SELECT
+      date,
+      COALESCE(SUM(cost), 0)        AS cost,
+      COALESCE(SUM(leads), 0)       AS leads,
+      COALESCE(SUM(sales_count), 0) AS sales_count,
+      COALESCE(SUM(revenue), 0)     AS revenue,
+      CASE WHEN SUM(leads) > 0 THEN ROUND(SUM(cost)/SUM(leads), 2) END AS cpl,
+      CASE WHEN SUM(sales_count) > 0 THEN ROUND(SUM(cost)/SUM(sales_count), 2) END AS cac,
+      CASE WHEN SUM(cost) > 0 THEN ROUND((SUM(revenue)-SUM(cost))/SUM(cost), 4) END AS romi
+    FROM daily_metrics
+    GROUP BY date
+    ORDER BY date DESC
+    LIMIT 5
+  `);
+
   const timeline = await db.execute(sql`
     SELECT
       date,
@@ -74,6 +91,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     totals: { ...(totals.rows[0] ?? {}), new_clients: clientsAgg.rows[0]?.new_clients ?? 0 },
     bySource: bySource.rows,
+    byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,
   });

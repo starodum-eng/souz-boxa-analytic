@@ -39,6 +39,16 @@ interface SourceRow {
   cac: number | null;
   romi: number | null;
 }
+interface DateRow {
+  date: string;
+  cost: number;
+  leads: number;
+  sales_count: number;
+  revenue: number;
+  cpl: number | null;
+  cac: number | null;
+  romi: number | null;
+}
 interface TimePoint {
   date: string;
   cost: number;
@@ -56,6 +66,7 @@ interface SyncRow {
 interface Data {
   totals: Totals;
   bySource: SourceRow[];
+  byDate: DateRow[];
   timeline: TimePoint[];
   lastSync: SyncRow[];
 }
@@ -197,6 +208,45 @@ export default function Dashboard() {
                 {data.bySource.length === 0 && (
                   <tr>
                     <td colSpan={8} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="section-title">По дням (5 дней)</div>
+          <div className="card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Расход</th>
+                  <th>Лиды</th>
+                  <th>CPL</th>
+                  <th>Продажи</th>
+                  <th>CAC</th>
+                  <th>Выручка</th>
+                  <th>ROMI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.byDate.map((d) => (
+                  <tr key={d.date}>
+                    <td>{new Date(d.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", weekday: "short" })}</td>
+                    <td>{rub(d.cost)}</td>
+                    <td>{num(d.leads)}</td>
+                    <td>{d.cpl != null ? rub(d.cpl) : "—"}</td>
+                    <td>{num(d.sales_count)}</td>
+                    <td>{d.cac != null ? rub(d.cac) : "—"}</td>
+                    <td>{rub(d.revenue)}</td>
+                    <td className={d.romi != null ? (Number(d.romi) >= 0 ? "pos" : "neg") : "muted"}>
+                      {pct(d.romi)}
+                    </td>
+                  </tr>
+                ))}
+                {data.byDate.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="muted">Нет данных. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
