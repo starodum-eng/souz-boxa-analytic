@@ -198,7 +198,8 @@ export async function recomputeDailyMetrics(): Promise<void> {
           WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(w.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
-          WHEN coalesce(w.utm_source,'') <> '' THEN w.utm_source
+          -- неразмеченные метки не выводим отдельно: всё в «Сайт (прочее)»,
+          -- пока пользователь не присвоит название на вкладке «Источники».
           ELSE 'Сайт (прочее)'
         END AS source,
         SUM(w.visits) AS visits,
