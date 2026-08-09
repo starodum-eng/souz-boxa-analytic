@@ -81,6 +81,55 @@ export async function GET(req: Request) {
     FROM matched GROUP BY source
   `);
 
+  // Выручка и клиенты по источникам Fitbase (advertising_source лида) — когорта
+  // по дате регистрации клиента. LTV = сумма абонементов клиента.
+  const revenueBySource = await db.execute(sql`
+    WITH lead_src AS (
+      SELECT DISTINCT ON (client_id) client_id, advertising_source
+      FROM fitbase_leads
+      WHERE client_id IS NOT NULL
+      ORDER BY client_id, created_at ASC NULLS LAST
+    ),
+    ltv AS (
+      SELECT client_id, SUM(amount) AS ltv
+      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+    ),
+    cohort AS (
+      SELECT
+        c.fitbase_id AS client_id,
+        COALESCE(NULLIF(ls.advertising_source, ''), 'Не определён') AS source,
+        COALESCE(l.ltv, 0) AS ltv
+      FROM clients c
+      LEFT JOIN lead_src ls ON ls.client_id = c.fitbase_id
+      LEFT JOIN ltv l ON l.client_id = c.fitbase_id
+      WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+    )
+    SELECT
+      source,
+      COUNT(*)::int AS clients,
+      COUNT(*) FILTER (WHERE ltv > 0)::int AS paying,
+      COALESCE(SUM(ltv), 0) AS revenue,
+      CASE WHEN COUNT(*) FILTER (WHERE ltv > 0) > 0
+        THEN ROUND(SUM(ltv) / COUNT(*) FILTER (WHERE ltv > 0), 0) END AS avg_check
+    FROM cohort
+    GROUP BY source
+    ORDER BY revenue DESC
+  `);
+
+  // Общая выручка (LTV) когорты за период — для KPI и общего ROMI.
+  const revenueTotalRes = await db.execute(sql`
+    WITH ltv AS (
+      SELECT client_id, SUM(amount) AS ltv
+      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+    )
+    SELECT COALESCE(SUM(l.ltv), 0) AS revenue
+    FROM clients c
+    JOIN ltv l ON l.client_id = c.fitbase_id
+    WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+  `);
+
   // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
   // плюс новые клиенты Fitbase по дате регистрации).
   const byDate = await db.execute(sql`
@@ -171,9 +220,17 @@ export async function GET(req: Request) {
     }
   }
 
+  const revenueTotal = Number(revenueTotalRes.rows[0]?.revenue ?? 0);
+
   return NextResponse.json({
-    totals: { ...(totals.rows[0] ?? {}), new_clients: clientsAgg.rows[0]?.new_clients ?? 0 },
+    totals: {
+      ...(totals.rows[0] ?? {}),
+      new_clients: clientsAgg.rows[0]?.new_clients ?? 0,
+      // выручка = LTV клиентов, привлечённых за период (когорта)
+      revenue: revenueTotal,
+    },
     bySource: bySourceMerged,
+    revenueBySource: revenueBySource.rows,
     byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,

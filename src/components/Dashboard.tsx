@@ -40,6 +40,13 @@ interface SourceRow {
   cac: number | null;
   romi: number | null;
 }
+interface RevenueSourceRow {
+  source: string;
+  clients: number;
+  paying: number;
+  revenue: number;
+  avg_check: number | null;
+}
 interface DateRow {
   date: string;
   cost: number;
@@ -68,6 +75,7 @@ interface SyncRow {
 interface Data {
   totals: Totals;
   bySource: SourceRow[];
+  revenueBySource: RevenueSourceRow[];
   byDate: DateRow[];
   timeline: TimePoint[];
   lastSync: SyncRow[];
@@ -282,6 +290,53 @@ export default function Dashboard() {
                       <td>{t.cac != null ? rub(t.cac) : "—"}</td>
                       <td>{rub(t.revenue)}</td>
                       <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
+            </table>
+          </div>
+
+          <div className="section-title">Выручка по источникам (Fitbase) · {PRESETS.find((p) => p.key === preset)?.label}</div>
+          <div className="card">
+            <table>
+              <thead>
+                <tr>
+                  <th>Источник</th>
+                  <th>Клиенты</th>
+                  <th>Оплатили</th>
+                  <th>Выручка (LTV)</th>
+                  <th>Средний чек</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.revenueBySource.map((r) => (
+                  <tr key={r.source}>
+                    <td>{r.source}</td>
+                    <td>{num(r.clients)}</td>
+                    <td>{num(r.paying)}</td>
+                    <td>{rub(r.revenue)}</td>
+                    <td>{r.avg_check != null ? rub(r.avg_check) : "—"}</td>
+                  </tr>
+                ))}
+                {data.revenueBySource.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted">Нет данных за период.</td>
+                  </tr>
+                )}
+              </tbody>
+              {data.revenueBySource.length > 0 && (() => {
+                const clients = data.revenueBySource.reduce((a, r) => a + Number(r.clients || 0), 0);
+                const paying = data.revenueBySource.reduce((a, r) => a + Number(r.paying || 0), 0);
+                const revenue = data.revenueBySource.reduce((a, r) => a + Number(r.revenue || 0), 0);
+                return (
+                  <tfoot>
+                    <tr className="total-row">
+                      <td>Всего</td>
+                      <td>{num(clients)}</td>
+                      <td>{num(paying)}</td>
+                      <td>{rub(revenue)}</td>
+                      <td>{paying > 0 ? rub(Math.round(revenue / paying)) : "—"}</td>
                     </tr>
                   </tfoot>
                 );
