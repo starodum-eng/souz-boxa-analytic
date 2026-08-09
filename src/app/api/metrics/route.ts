@@ -53,68 +53,69 @@ export async function GET(req: Request) {
     ORDER BY cost DESC
   `);
 
-  // Клиенты, привязанные к каналу по телефону (склейка Fitbase ↔ касания форм/Callibri).
-  // Берём первое касание по номеру телефона, из него — источник.
-  const clientsBySource = await db.execute(sql`
-    WITH ft AS (
-      SELECT DISTINCT ON (phone_norm)
-        phone_norm, lower(utm_source) AS utm_source
-      FROM lead_touches
-      WHERE phone_norm IS NOT NULL AND coalesce(utm_source,'') <> ''
-      ORDER BY phone_norm, created_at ASC
+  // Двойная ловушка UTM + деньги: канал клиента определяется по приоритету
+  //   1) UTM из лида Fitbase  2) UTM из нашего трекера форм (по телефону)
+  //   3) advertising_source Fitbase  4) «Не определён».
+  // LTV = сумма абонементов. Когорта — по дате регистрации клиента в периоде.
+  const clientRevBySource = await db.execute(sql`
+    WITH fb_utm AS (
+      SELECT DISTINCT ON (client_id) client_id, lower(utm_source) AS utm_source
+      FROM fitbase_leads
+      WHERE client_id IS NOT NULL AND coalesce(utm_source,'') <> ''
+      ORDER BY client_id, created_at ASC NULLS LAST
     ),
-    matched AS (
-      SELECT
-        CASE
-          WHEN coalesce(m.label,'') <> '' THEN m.label
-          WHEN ft.utm_source LIKE '%yandex%' OR ft.utm_source LIKE '%direct%' THEN 'Яндекс.Директ'
-          WHEN ft.utm_source LIKE '%vk%' THEN 'VK Реклама'
-          ELSE 'Сайт (прочее)'
-        END AS source
-      FROM clients c
-      JOIN ft ON ft.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
-      LEFT JOIN source_mappings m ON m.utm_source = ft.utm_source
-      WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-        AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
-    )
-    SELECT source, COUNT(*)::int AS clients
-    FROM matched GROUP BY source
-  `);
-
-  // Выручка и клиенты по источникам Fitbase (advertising_source лида) — когорта
-  // по дате регистрации клиента. LTV = сумма абонементов клиента.
-  const revenueBySource = await db.execute(sql`
-    WITH lead_src AS (
+    fb_adv AS (
       SELECT DISTINCT ON (client_id) client_id, advertising_source
       FROM fitbase_leads
       WHERE client_id IS NOT NULL
       ORDER BY client_id, created_at ASC NULLS LAST
     ),
+    tracker AS (
+      SELECT DISTINCT ON (phone_norm) phone_norm, lower(utm_source) AS utm_source
+      FROM lead_touches
+      WHERE phone_norm IS NOT NULL AND coalesce(utm_source,'') <> ''
+      ORDER BY phone_norm, created_at ASC
+    ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
       FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
     ),
-    cohort AS (
+    resolved AS (
       SELECT
         c.fitbase_id AS client_id,
-        COALESCE(NULLIF(ls.advertising_source, ''), 'Не определён') AS source,
-        COALESCE(l.ltv, 0) AS ltv
+        (c.created_at AT TIME ZONE 'Europe/Moscow')::date AS reg_date,
+        COALESCE(l.ltv, 0) AS ltv,
+        COALESCE(fu.utm_source, tr.utm_source) AS utm_source,
+        fa.advertising_source
       FROM clients c
-      LEFT JOIN lead_src ls ON ls.client_id = c.fitbase_id
       LEFT JOIN ltv l ON l.client_id = c.fitbase_id
-      WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-        AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      LEFT JOIN fb_utm fu ON fu.client_id = c.fitbase_id
+      LEFT JOIN tracker tr ON tr.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
+      LEFT JOIN fb_adv fa ON fa.client_id = c.fitbase_id
+    ),
+    channeled AS (
+      SELECT
+        r.reg_date, r.ltv,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN r.utm_source LIKE '%yandex%' OR r.utm_source LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN r.utm_source LIKE '%vk%' THEN 'VK Реклама'
+          WHEN coalesce(r.utm_source,'') <> '' THEN r.utm_source
+          WHEN lower(coalesce(r.advertising_source,'')) LIKE '%вконтакте%' THEN 'VK Реклама'
+          WHEN coalesce(r.advertising_source,'') <> '' THEN r.advertising_source
+          ELSE 'Не определён'
+        END AS source
+      FROM resolved r
+      LEFT JOIN source_mappings m ON coalesce(r.utm_source,'') <> '' AND m.utm_source = r.utm_source
     )
     SELECT
       source,
       COUNT(*)::int AS clients,
       COUNT(*) FILTER (WHERE ltv > 0)::int AS paying,
-      COALESCE(SUM(ltv), 0) AS revenue,
-      CASE WHEN COUNT(*) FILTER (WHERE ltv > 0) > 0
-        THEN ROUND(SUM(ltv) / COUNT(*) FILTER (WHERE ltv > 0), 0) END AS avg_check
-    FROM cohort
+      COALESCE(SUM(ltv), 0) AS revenue
+    FROM channeled
+    WHERE reg_date >= ${from} AND reg_date <= ${to}
     GROUP BY source
-    ORDER BY revenue DESC
   `);
 
   // Общая выручка (LTV) когорты за период — для KPI и общего ROMI.
@@ -194,31 +195,39 @@ export async function GET(req: Request) {
     ORDER BY finished_at DESC NULLS LAST
   `);
 
-  // Слияние привязанных клиентов в разбивку по источникам.
-  const clientMap = new Map<string, number>(
-    clientsBySource.rows.map((r: Record<string, unknown>) => [String(r.source), Number(r.clients)]),
+  // Единая разбивка по источникам: реклама (расход/лиды) + клиенты/выручка (LTV)
+  // на одном ключе-канале → настоящий ROMI по каналу, где есть и расход, и деньги.
+  const crMap = new Map<string, { clients: number; paying: number; revenue: number }>(
+    clientRevBySource.rows.map((r: Record<string, unknown>) => [
+      String(r.source),
+      { clients: Number(r.clients), paying: Number(r.paying), revenue: Number(r.revenue) },
+    ]),
   );
-  const bySourceMerged: Record<string, unknown>[] = bySource.rows.map((r: Record<string, unknown>) => ({
-    ...r,
-    clients: clientMap.get(String(r.source)) ?? 0,
-  }));
-  // Каналы, у которых есть привязанные клиенты, но нет строки в витрине — добавляем.
-  const seen = new Set(bySourceMerged.map((r) => String(r.source)));
-  for (const [source, clients] of clientMap) {
-    if (!seen.has(source)) {
-      bySourceMerged.push({
-        source,
-        cost: 0,
-        leads: 0,
-        sales_count: 0,
-        revenue: 0,
-        cpl: null,
-        cac: null,
-        romi: null,
-        clients,
-      });
-    }
-  }
+  const adMap = new Map<string, Record<string, unknown>>(
+    bySource.rows.map((r: Record<string, unknown>) => [String(r.source), r]),
+  );
+  const allSources = new Set<string>([...adMap.keys(), ...crMap.keys()]);
+
+  const bySourceMerged = [...allSources].map((source) => {
+    const ad = adMap.get(source);
+    const cr = crMap.get(source) ?? { clients: 0, paying: 0, revenue: 0 };
+    const cost = Number(ad?.cost ?? 0);
+    const leads = Number(ad?.leads ?? 0);
+    const revenue = cr.revenue;
+    return {
+      source,
+      cost,
+      clicks: Number(ad?.clicks ?? 0),
+      leads,
+      clients: cr.clients,
+      paying: cr.paying,
+      revenue,
+      cpl: leads > 0 ? Math.round((cost / leads) * 100) / 100 : null,
+      cac: cost > 0 && cr.clients > 0 ? Math.round((cost / cr.clients) * 100) / 100 : null,
+      romi: cost > 0 ? Math.round(((revenue - cost) / cost) * 10000) / 10000 : null,
+    };
+  });
+  bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
 
   const revenueTotal = Number(revenueTotalRes.rows[0]?.revenue ?? 0);
 
@@ -230,7 +239,6 @@ export async function GET(req: Request) {
       revenue: revenueTotal,
     },
     bySource: bySourceMerged,
-    revenueBySource: revenueBySource.rows,
     byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,

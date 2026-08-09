@@ -34,18 +34,11 @@ interface SourceRow {
   cost: number;
   leads: number;
   clients: number;
-  sales_count: number;
+  paying: number;
   revenue: number;
   cpl: number | null;
   cac: number | null;
   romi: number | null;
-}
-interface RevenueSourceRow {
-  source: string;
-  clients: number;
-  paying: number;
-  revenue: number;
-  avg_check: number | null;
 }
 interface DateRow {
   date: string;
@@ -75,7 +68,6 @@ interface SyncRow {
 interface Data {
   totals: Totals;
   bySource: SourceRow[];
-  revenueBySource: RevenueSourceRow[];
   byDate: DateRow[];
   timeline: TimePoint[];
   lastSync: SyncRow[];
@@ -248,7 +240,7 @@ export default function Dashboard() {
                   <th>Лиды</th>
                   <th>CPL</th>
                   <th>Клиенты</th>
-                  <th>Продажи</th>
+                  <th>Оплатили</th>
                   <th>CAC</th>
                   <th>Выручка</th>
                   <th>ROMI</th>
@@ -262,7 +254,7 @@ export default function Dashboard() {
                     <td>{num(s.leads)}</td>
                     <td>{s.cpl != null ? rub(s.cpl) : "—"}</td>
                     <td>{num(s.clients)}</td>
-                    <td>{num(s.sales_count)}</td>
+                    <td>{num(s.paying)}</td>
                     <td>{s.cac != null ? rub(s.cac) : "—"}</td>
                     <td>{rub(s.revenue)}</td>
                     <td className={s.romi != null ? (Number(s.romi) >= 0 ? "pos" : "neg") : "muted"}>
@@ -286,57 +278,10 @@ export default function Dashboard() {
                       <td>{num(t.leads)}</td>
                       <td>{t.cpl != null ? rub(t.cpl) : "—"}</td>
                       <td>{num(t.clients)}</td>
-                      <td>{num(t.sales_count)}</td>
+                      <td>{num(t.paying)}</td>
                       <td>{t.cac != null ? rub(t.cac) : "—"}</td>
                       <td>{rub(t.revenue)}</td>
                       <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
-                    </tr>
-                  </tfoot>
-                );
-              })()}
-            </table>
-          </div>
-
-          <div className="section-title">Выручка по источникам (Fitbase) · {PRESETS.find((p) => p.key === preset)?.label}</div>
-          <div className="card">
-            <table>
-              <thead>
-                <tr>
-                  <th>Источник</th>
-                  <th>Клиенты</th>
-                  <th>Оплатили</th>
-                  <th>Выручка (LTV)</th>
-                  <th>Средний чек</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.revenueBySource.map((r) => (
-                  <tr key={r.source}>
-                    <td>{r.source}</td>
-                    <td>{num(r.clients)}</td>
-                    <td>{num(r.paying)}</td>
-                    <td>{rub(r.revenue)}</td>
-                    <td>{r.avg_check != null ? rub(r.avg_check) : "—"}</td>
-                  </tr>
-                ))}
-                {data.revenueBySource.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="muted">Нет данных за период.</td>
-                  </tr>
-                )}
-              </tbody>
-              {data.revenueBySource.length > 0 && (() => {
-                const clients = data.revenueBySource.reduce((a, r) => a + Number(r.clients || 0), 0);
-                const paying = data.revenueBySource.reduce((a, r) => a + Number(r.paying || 0), 0);
-                const revenue = data.revenueBySource.reduce((a, r) => a + Number(r.revenue || 0), 0);
-                return (
-                  <tfoot>
-                    <tr className="total-row">
-                      <td>Всего</td>
-                      <td>{num(clients)}</td>
-                      <td>{num(paying)}</td>
-                      <td>{rub(revenue)}</td>
-                      <td>{paying > 0 ? rub(Math.round(revenue / paying)) : "—"}</td>
                     </tr>
                   </tfoot>
                 );
@@ -446,21 +391,24 @@ export default function Dashboard() {
 }
 
 /** Сумма показателей строк; производные (CPL/CAC/ROMI) считаются от итогов. */
-function sumMetrics(rows: Array<{ cost: number; leads: number; clients: number; sales_count: number; revenue: number }>) {
+function sumMetrics(rows: readonly unknown[]) {
   const n = (v: unknown) => Number(v) || 0;
-  const cost = rows.reduce((a, r) => a + n(r.cost), 0);
-  const leads = rows.reduce((a, r) => a + n(r.leads), 0);
-  const clients = rows.reduce((a, r) => a + n(r.clients), 0);
-  const sales_count = rows.reduce((a, r) => a + n(r.sales_count), 0);
-  const revenue = rows.reduce((a, r) => a + n(r.revenue), 0);
+  const sum = (k: string) => rows.reduce((a: number, r) => a + n((r as Record<string, unknown>)[k]), 0);
+  const cost = sum("cost");
+  const leads = sum("leads");
+  const clients = sum("clients");
+  const paying = sum("paying");
+  const sales_count = sum("sales_count");
+  const revenue = sum("revenue");
   return {
     cost,
     leads,
     clients,
+    paying,
     sales_count,
     revenue,
     cpl: leads > 0 ? cost / leads : null,
-    cac: sales_count > 0 ? cost / sales_count : null,
+    cac: cost > 0 && clients > 0 ? cost / clients : null,
     romi: cost > 0 ? (revenue - cost) / cost : null,
   };
 }
