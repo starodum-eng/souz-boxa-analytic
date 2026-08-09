@@ -177,7 +177,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="section-title">По источникам</div>
+          <div className="section-title">По источникам (за {days} дн.)</div>
           <div className="card">
             <table>
               <thead>
