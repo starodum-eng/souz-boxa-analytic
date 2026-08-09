@@ -111,6 +111,7 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
   }
 
   const out: CallibriTouch[] = [];
+  let firstJson: any = null;
   for (const [d1, d2] of weekChunks(range)) {
     const url = `${baseUrl()}/site_get_statistics?site_id=${encodeURIComponent(siteId)}&date1=${ddmmyyyy(d1)}&date2=${ddmmyyyy(d2)}&${auth}`;
     const res = await fetch(url);
@@ -119,6 +120,7 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
       throw new Error(`Callibri /site_get_statistics error ${res.status}: ${text.slice(0, 200)}`);
     }
     const json = await res.json();
+    if (firstJson === null) firstJson = json;
     for (const { o, channel, nameChannel } of collect(json)) {
       const phone = o.phone ?? null;
       const externalId = o.id != null ? `callibri:${o.id}` : `callibri:${channel}:${normalizePhone(phone) ?? "x"}:${o.date ?? ""}`;
@@ -135,6 +137,18 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
       });
     }
     await sleep(RATE_LIMIT_MS);
+  }
+
+  // Диагностика: если ничего не распарсилось — показываем реальную структуру ответа,
+  // чтобы подогнать парсер (видно в «Сообщении» статуса синхронизации).
+  if (out.length === 0 && firstJson) {
+    const top = firstJson && typeof firstJson === "object" ? Object.keys(firstJson) : typeof firstJson;
+    const cs = firstJson?.channels_statistics;
+    const csKeys = Array.isArray(cs) && cs[0] && typeof cs[0] === "object" ? Object.keys(cs[0]) : null;
+    const snippet = JSON.stringify(firstJson).slice(0, 500);
+    throw new Error(
+      `Callibri: 0 обращений. keys=${JSON.stringify(top)}; channels_statistics[0]=${JSON.stringify(csKeys)}; sample=${snippet}`,
+    );
   }
   return out;
 }
