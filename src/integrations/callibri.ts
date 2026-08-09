@@ -138,17 +138,7 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
     }
     await sleep(RATE_LIMIT_MS);
   }
-
-  // Диагностика: если ничего не распарсилось — показываем реальную структуру ответа,
-  // чтобы подогнать парсер (видно в «Сообщении» статуса синхронизации).
-  if (out.length === 0 && firstJson) {
-    const top = firstJson && typeof firstJson === "object" ? Object.keys(firstJson) : typeof firstJson;
-    const cs = firstJson?.channels_statistics;
-    const csKeys = Array.isArray(cs) && cs[0] && typeof cs[0] === "object" ? Object.keys(cs[0]) : null;
-    const snippet = JSON.stringify(firstJson).slice(0, 500);
-    throw new Error(
-      `Callibri: 0 обращений. keys=${JSON.stringify(top)}; channels_statistics[0]=${JSON.stringify(csKeys)}; sample=${snippet}`,
-    );
-  }
+  void firstJson;
+  // Пусто — норма, если Callibri не используется в этот период. Возвращаем 0 (ok).
   return out;
 }
