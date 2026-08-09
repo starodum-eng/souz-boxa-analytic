@@ -74,7 +74,8 @@ export async function GET(req: Request) {
       FROM clients c
       JOIN ft ON ft.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
       LEFT JOIN source_mappings m ON m.utm_source = ft.utm_source
-      WHERE c.created_at::date >= ${from} AND c.created_at::date <= ${to}
+      WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
     )
     SELECT source, COUNT(*)::int AS clients
     FROM matched GROUP BY source
@@ -90,7 +91,7 @@ export async function GET(req: Request) {
       FROM daily_metrics GROUP BY date
     ),
     cl AS (
-      SELECT created_at::date AS date, COUNT(*) AS clients
+      SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS clients
       FROM clients WHERE created_at IS NOT NULL GROUP BY 1
     ),
     dates AS (
@@ -129,7 +130,8 @@ export async function GET(req: Request) {
   const clientsAgg = await db.execute(sql`
     SELECT COUNT(*)::int AS new_clients
     FROM clients
-    WHERE created_at::date >= ${from} AND created_at::date <= ${to}
+    WHERE (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
   `);
 
   // Последний статус по каждому источнику (по одной строке на источник).
