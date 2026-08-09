@@ -13,7 +13,8 @@ import { normalizePhone } from "@/lib/phone";
  */
 
 const DEFAULT_BASE_URL = "https://api.callibri.ru";
-const RATE_LIMIT_MS = 1100; // 1 req/sec + запас
+const RATE_LIMIT_MS = 1500; // 1 req/sec + запас
+const MAX_RETRIES = 5; // повторы при 429
 
 export interface CallibriTouch {
   externalId: string;
@@ -28,6 +29,17 @@ export interface CallibriTouch {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** GET с уважением к лимиту Callibri: при 429 ждём с нарастанием и повторяем. */
+async function callibriGet(url: string): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url);
+    if (res.status !== 429) return res;
+    // 429 «Retry later» — ждём дольше и пробуем снова.
+    await sleep(2000 * (attempt + 1));
+  }
+  throw new Error("Callibri: превышен лимит запросов (429) даже после повторов");
+}
 
 function baseUrl(): string {
   return (process.env.CALLIBRI_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
@@ -101,7 +113,7 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
   // site_id — из env или первый из /get_sites.
   let siteId = process.env.CALLIBRI_SITE_ID?.trim();
   if (!siteId) {
-    const res = await fetch(`${baseUrl()}/get_sites?${auth}`);
+    const res = await callibriGet(`${baseUrl()}/get_sites?${auth}`);
     if (!res.ok) throw new Error(`Callibri /get_sites error ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const json = (await res.json()) as any;
     const sites = json?.sites ?? json?.data ?? json;
@@ -114,7 +126,7 @@ export async function fetchCallibri(range: DateRange): Promise<CallibriTouch[]> 
   let firstJson: any = null;
   for (const [d1, d2] of weekChunks(range)) {
     const url = `${baseUrl()}/site_get_statistics?site_id=${encodeURIComponent(siteId)}&date1=${ddmmyyyy(d1)}&date2=${ddmmyyyy(d2)}&${auth}`;
-    const res = await fetch(url);
+    const res = await callibriGet(url);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Callibri /site_get_statistics error ${res.status}: ${text.slice(0, 200)}`);
