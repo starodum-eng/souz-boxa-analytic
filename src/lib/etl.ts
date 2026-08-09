@@ -193,13 +193,14 @@ export async function recomputeDailyMetrics(): Promise<void> {
       SELECT
         w.date,
         CASE
+          -- Метка (utm_source) важнее типа трафика: если метка есть — канал по ней.
           WHEN coalesce(m.label,'') <> '' THEN m.label
-          WHEN lower(coalesce(w.traffic_source,'')) = 'organic' THEN 'SEO (органика)'
-          WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(w.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
-          -- неразмеченные метки не выводим отдельно: всё в «Сайт (прочее)»,
-          -- пока пользователь не присвоит название на вкладке «Источники».
+          -- Метки нет → смотрим тип трафика (органика/прямые заходы).
+          WHEN lower(coalesce(w.traffic_source,'')) = 'organic' THEN 'SEO (органика)'
+          WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
+          -- Прочий неразмеченный трафик без метки.
           ELSE 'Сайт (прочее)'
         END AS source,
         SUM(w.visits) AS visits,
