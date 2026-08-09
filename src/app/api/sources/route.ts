@@ -29,11 +29,25 @@ export async function GET() {
       SUM(src.l)::int AS leads,
       SUM(src.t)::int AS touches,
       m.label AS label,
-      coalesce(m.ignored, 0) AS ignored
+      coalesce(m.ignored, 0) AS ignored,
+      -- текущий канал метки: ручное название > авто-правила Директ/VK
+      CASE
+        WHEN coalesce(m.label,'') <> '' THEN m.label
+        WHEN src.u LIKE '%yandex%' OR src.u LIKE '%direct%' THEN 'Яндекс.Директ'
+        WHEN src.u LIKE '%vk%' THEN 'VK Реклама'
+        ELSE NULL
+      END AS effective,
+      CASE
+        WHEN coalesce(m.label,'') <> '' THEN 'manual'
+        WHEN src.u LIKE '%yandex%' OR src.u LIKE '%direct%' OR src.u LIKE '%vk%' THEN 'auto'
+        ELSE NULL
+      END AS kind
     FROM src
     LEFT JOIN source_mappings m ON m.utm_source = src.u
     GROUP BY src.u, m.label, m.ignored
-    ORDER BY (coalesce(m.label,'') <> ''), SUM(src.v) DESC, SUM(src.t) DESC
+    ORDER BY
+      (CASE WHEN coalesce(m.label,'')<>'' OR src.u LIKE '%yandex%' OR src.u LIKE '%direct%' OR src.u LIKE '%vk%' THEN 1 ELSE 0 END),
+      SUM(src.v) DESC, SUM(src.t) DESC
   `);
   return NextResponse.json({ items: rows.rows });
 }

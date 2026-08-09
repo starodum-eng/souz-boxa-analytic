@@ -10,6 +10,8 @@ interface SourceItem {
   touches: number;
   label: string | null;
   ignored: number;
+  effective: string | null; // текущий канал (ручной или авто)
+  kind: "manual" | "auto" | null;
 }
 
 export default function Sources() {
@@ -54,7 +56,8 @@ export default function Sources() {
 
   const active = items?.filter((i) => !i.ignored) ?? [];
   const hidden = items?.filter((i) => i.ignored) ?? [];
-  const unmapped = active.filter((i) => !i.label).length;
+  // «без названия» — только те, у кого нет ни ручного названия, ни авто-канала
+  const unmapped = active.filter((i) => !i.effective).length;
 
   return (
     <div className="container">
@@ -83,6 +86,7 @@ export default function Sources() {
                 <th>Визиты</th>
                 <th>Лиды</th>
                 <th>Касания</th>
+                <th style={{ textAlign: "left" }}>Канал (текущий)</th>
                 <th style={{ textAlign: "left" }}>Название канала</th>
                 <th></th>
               </tr>
@@ -95,10 +99,20 @@ export default function Sources() {
                   <td>{num(it.leads)}</td>
                   <td>{num(it.touches)}</td>
                   <td style={{ textAlign: "left" }}>
+                    {it.effective ? (
+                      <span>
+                        {it.effective}
+                        {it.kind === "auto" && <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>авто</span>}
+                      </span>
+                    ) : (
+                      <span className="badge error">без названия</span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: "left" }}>
                     <input
                       className="src-input"
                       value={drafts[it.utm_source] ?? ""}
-                      placeholder="напр. Реклама в лифтах"
+                      placeholder={it.kind === "auto" ? `по умолчанию: ${it.effective}` : "напр. Реклама в лифтах"}
                       onChange={(e) => setDrafts((d) => ({ ...d, [it.utm_source]: e.target.value }))}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") save(it.utm_source);
@@ -126,7 +140,7 @@ export default function Sources() {
               ))}
               {active.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     Пока нет UTM-меток. Они появятся здесь, как только пойдёт трафик с метками.
                   </td>
                 </tr>
