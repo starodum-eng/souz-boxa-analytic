@@ -73,17 +73,70 @@ interface Data {
   lastSync: SyncRow[];
 }
 
-const RANGES = [7, 30, 90];
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+// Начало недели — понедельник.
+function startOfWeek(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = (x.getDay() + 6) % 7; // 0 = понедельник
+  return addDays(x, -dow);
+}
+
+type PresetKey = "today" | "yesterday" | "thisWeek" | "lastWeek" | "7d" | "30d" | "90d";
+const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: "today", label: "Сегодня" },
+  { key: "yesterday", label: "Вчера" },
+  { key: "thisWeek", label: "Эта нед." },
+  { key: "lastWeek", label: "Прошл. нед." },
+  { key: "7d", label: "7 дн." },
+  { key: "30d", label: "30 дн." },
+  { key: "90d", label: "90 дн." },
+];
+
+function presetRange(key: PresetKey): { from: string; to: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (key) {
+    case "today":
+      return { from: ymd(today), to: ymd(today) };
+    case "yesterday": {
+      const y = addDays(today, -1);
+      return { from: ymd(y), to: ymd(y) };
+    }
+    case "thisWeek":
+      return { from: ymd(startOfWeek(today)), to: ymd(today) };
+    case "lastWeek": {
+      const sow = startOfWeek(today);
+      return { from: ymd(addDays(sow, -7)), to: ymd(addDays(sow, -1)) };
+    }
+    case "7d":
+      return { from: ymd(addDays(today, -6)), to: ymd(today) };
+    case "30d":
+      return { from: ymd(addDays(today, -29)), to: ymd(today) };
+    case "90d":
+      return { from: ymd(addDays(today, -89)), to: ymd(today) };
+  }
+}
 
 export default function Dashboard() {
-  const [days, setDays] = useState(30);
+  const [preset, setPreset] = useState<PresetKey>("30d");
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   function loadMetrics() {
-    return fetch(`/api/metrics?days=${days}`)
+    const { from, to } = presetRange(preset);
+    return fetch(`/api/metrics?from=${from}&to=${to}`)
       .then((r) => r.json())
       .then(setData)
       .catch((e) => setError(String(e)));
@@ -94,7 +147,7 @@ export default function Dashboard() {
     setError(null);
     loadMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
+  }, [preset]);
 
   async function handleSync() {
     setSyncing(true);
@@ -128,9 +181,9 @@ export default function Dashboard() {
           <div className="sub">Реклама → визиты → лиды → клиенты. Данные обновляются раз в сутки.</div>
         </div>
         <div className="controls">
-          {RANGES.map((r) => (
-            <button key={r} className={r === days ? "active" : ""} onClick={() => setDays(r)}>
-              {r} дн.
+          {PRESETS.map((p) => (
+            <button key={p.key} className={p.key === preset ? "active" : ""} onClick={() => setPreset(p.key)}>
+              {p.label}
             </button>
           ))}
           <button onClick={handleSync} disabled={syncing} className="sync-btn">
@@ -177,7 +230,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="section-title">По источникам (за {days} дн.)</div>
+          <div className="section-title">По источникам · {PRESETS.find((p) => p.key === preset)?.label}</div>
           <div className="card">
             <table>
               <thead>

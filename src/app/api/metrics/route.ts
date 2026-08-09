@@ -6,12 +6,24 @@ export const dynamic = "force-dynamic";
 
 /**
  * Данные для дашборда, читаются из витрины daily_metrics.
- * ?days=30 — окно; по умолчанию 30 дней.
+ * ?from=YYYY-MM-DD&to=YYYY-MM-DD — диапазон дат (по умолчанию последние 30 дней).
  * Возвращаем: итоги, разбивку по источникам и дневную динамику.
  */
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const days = Math.min(Math.max(Number(url.searchParams.get("days")) || 30, 1), 365);
+  const valid = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);
+  const now = new Date();
+  const to = valid(url.searchParams.get("to")) ?? ymd(now);
+  const from =
+    valid(url.searchParams.get("from")) ??
+    ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
 
   const totals = await db.execute(sql`
     SELECT
@@ -22,7 +34,7 @@ export async function GET(req: Request) {
       COALESCE(SUM(sales_count), 0) AS sales_count,
       COALESCE(SUM(revenue), 0)     AS revenue
     FROM daily_metrics
-    WHERE date >= CURRENT_DATE - ${days}::int
+    WHERE date >= ${from} AND date <= ${to}
   `);
 
   const bySource = await db.execute(sql`
@@ -36,7 +48,7 @@ export async function GET(req: Request) {
       CASE WHEN SUM(sales_count) > 0 THEN ROUND(SUM(cost)/SUM(sales_count), 2) END AS cac,
       CASE WHEN SUM(cost) > 0 THEN ROUND((SUM(revenue)-SUM(cost))/SUM(cost), 4) END AS romi
     FROM daily_metrics
-    WHERE date >= CURRENT_DATE - ${days}::int
+    WHERE date >= ${from} AND date <= ${to}
     GROUP BY source
     ORDER BY cost DESC
   `);
@@ -62,7 +74,7 @@ export async function GET(req: Request) {
       FROM clients c
       JOIN ft ON ft.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
       LEFT JOIN source_mappings m ON m.utm_source = ft.utm_source
-      WHERE c.created_at >= CURRENT_DATE - ${days}::int
+      WHERE c.created_at::date >= ${from} AND c.created_at::date <= ${to}
     )
     SELECT source, COUNT(*)::int AS clients
     FROM matched GROUP BY source
@@ -108,7 +120,7 @@ export async function GET(req: Request) {
       COALESCE(SUM(leads), 0)   AS leads,
       COALESCE(SUM(revenue), 0) AS revenue
     FROM daily_metrics
-    WHERE date >= CURRENT_DATE - ${days}::int
+    WHERE date >= ${from} AND date <= ${to}
     GROUP BY date
     ORDER BY date
   `);
@@ -117,7 +129,7 @@ export async function GET(req: Request) {
   const clientsAgg = await db.execute(sql`
     SELECT COUNT(*)::int AS new_clients
     FROM clients
-    WHERE created_at >= CURRENT_DATE - ${days}::int
+    WHERE created_at::date >= ${from} AND created_at::date <= ${to}
   `);
 
   // Последний статус по каждому источнику (по одной строке на источник).
