@@ -88,7 +88,8 @@ export type SourceKey =
   | "yandex_metrika"
   | "yandex_business"
   | "vk_ads"
-  | "fitbase";
+  | "fitbase"
+  | "callibri";
 
 /** Утилита: строка последних N дней в формате YYYY-MM-DD. */
 export function lastNDays(n: number): DateRange {

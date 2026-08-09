@@ -5,8 +5,10 @@ import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
 import { fetchYandexMetrika } from "@/integrations/yandex-metrika";
 import { fetchVkAdsSpend } from "@/integrations/vk-ads";
 import { fetchFitbaseClients, fetchFitbaseLeads, fetchFitbaseContracts } from "@/integrations/fitbase";
+import { fetchCallibri } from "@/integrations/callibri";
+import { normalizePhone } from "@/lib/phone";
 
-const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, leadTouches, dailyMetrics, syncLog } = schema;
 
 export interface SyncResult {
   source: SourceKey;
@@ -189,6 +191,46 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     return clientRows.length + leadRows.length + contractRows.length;
+  }));
+
+  results.push(await guarded("callibri", async () => {
+    const touches = await fetchCallibri(range);
+    // Дедуп по externalId (одно обращение могло попасть в пересекающиеся окна).
+    const uniq = new Map<string, (typeof touches)[number]>();
+    for (const t of touches) uniq.set(t.externalId, t);
+    const rows = [...uniq.values()];
+    const CHUNK = 500;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const batch = rows.slice(i, i + CHUNK).map((t) => ({
+        externalId: t.externalId,
+        channel: t.channel,
+        phoneNorm: t.phone ? normalizePhone(t.phone) : null,
+        phoneRaw: t.phone ? String(t.phone).slice(0, 64) : null,
+        utmSource: t.utmSource,
+        utmMedium: t.utmMedium,
+        utmCampaign: t.utmCampaign,
+        channelName: t.channelName,
+        createdAt: t.createdAt,
+        raw: t.raw,
+      }));
+      await db
+        .insert(leadTouches)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [leadTouches.externalId],
+          set: {
+            channel: sql`excluded.channel`,
+            phoneNorm: sql`excluded.phone_norm`,
+            utmSource: sql`excluded.utm_source`,
+            utmMedium: sql`excluded.utm_medium`,
+            utmCampaign: sql`excluded.utm_campaign`,
+            channelName: sql`excluded.channel_name`,
+            createdAt: sql`excluded.created_at`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+    return rows.length;
   }));
 
   // После загрузки сырья — пересчитываем витрину.

@@ -25,6 +25,7 @@ export const sourceEnum = pgEnum("source", [
   "site", // прочий небрендовый трафик без UTM (реферальный/соцсети и т.п.)
   "seo", // органический поиск (lastTrafficSource = organic)
   "direct", // прямые заходы (lastTrafficSource = direct)
+  "callibri", // коллтрекинг: звонки/формы/чаты
 ]);
 
 /**
