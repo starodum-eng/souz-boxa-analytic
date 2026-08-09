@@ -180,7 +180,8 @@ export const syncLog = pgTable("sync_log", {
 export const sourceMappings = pgTable("source_mappings", {
   id: serial("id").primaryKey(),
   utmSource: varchar("utm_source", { length: 256 }).notNull().unique(), // хранится в lower-case
-  label: varchar("label", { length: 256 }).notNull(),
+  label: varchar("label", { length: 256 }).notNull().default(""),
+  ignored: integer("ignored").notNull().default(0), // 1 — скрыть метку из списка (мусор/тест)
   isPaid: integer("is_paid").notNull().default(0), // 1 — платный канал (для будущей группировки)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

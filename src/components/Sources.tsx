@@ -9,6 +9,7 @@ interface SourceItem {
   leads: number;
   touches: number;
   label: string | null;
+  ignored: number;
 }
 
 export default function Sources() {
@@ -32,13 +33,13 @@ export default function Sources() {
 
   useEffect(load, []);
 
-  async function save(utm: string) {
-    setSavingKey(utm);
+  async function post(payload: Record<string, unknown>, key: string) {
+    setSavingKey(key);
     try {
       await fetch("/api/sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utm_source: utm, label: drafts[utm] ?? "" }),
+        body: JSON.stringify(payload),
       });
       load();
     } catch (e) {
@@ -47,8 +48,13 @@ export default function Sources() {
       setSavingKey(null);
     }
   }
+  const save = (utm: string) => post({ utm_source: utm, label: drafts[utm] ?? "" }, utm);
+  const hide = (utm: string) => post({ utm_source: utm, ignored: true }, utm);
+  const unhide = (utm: string) => post({ utm_source: utm, ignored: false, label: "" }, utm);
 
-  const unmapped = items?.filter((i) => !i.label).length ?? 0;
+  const active = items?.filter((i) => !i.ignored) ?? [];
+  const hidden = items?.filter((i) => i.ignored) ?? [];
+  const unmapped = active.filter((i) => !i.label).length;
 
   return (
     <div className="container">
@@ -82,7 +88,7 @@ export default function Sources() {
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
+              {active.map((it) => (
                 <tr key={it.utm_source}>
                   <td style={{ fontFamily: "monospace" }}>{it.utm_source}</td>
                   <td>{num(it.visits)}</td>
@@ -99,7 +105,7 @@ export default function Sources() {
                       }}
                     />
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <button
                       className="src-save"
                       disabled={savingKey === it.utm_source || (drafts[it.utm_source] ?? "") === (it.label ?? "")}
@@ -107,10 +113,18 @@ export default function Sources() {
                     >
                       {savingKey === it.utm_source ? "…" : "Сохранить"}
                     </button>
+                    <button
+                      className="src-hide"
+                      disabled={savingKey === it.utm_source}
+                      onClick={() => hide(it.utm_source)}
+                      title="Убрать метку из списка (мусор/тест) — уйдёт в «Сайт (прочее)»"
+                    >
+                      Скрыть
+                    </button>
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && (
+              {active.length === 0 && (
                 <tr>
                   <td colSpan={6} className="muted">
                     Пока нет UTM-меток. Они появятся здесь, как только пойдёт трафик с метками.
@@ -120,6 +134,34 @@ export default function Sources() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {hidden.length > 0 && (
+        <>
+          <div className="section-title">Скрытые метки ({hidden.length})</div>
+          <div className="card">
+            <table>
+              <thead>
+                <tr>
+                  <th>UTM-метка</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {hidden.map((it) => (
+                  <tr key={it.utm_source}>
+                    <td style={{ fontFamily: "monospace" }} className="muted">{it.utm_source}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button className="src-save" disabled={savingKey === it.utm_source} onClick={() => unhide(it.utm_source)}>
+                        Вернуть
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <div className="card muted" style={{ marginTop: 16, fontSize: 13 }}>

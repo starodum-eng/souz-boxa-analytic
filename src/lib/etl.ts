@@ -193,7 +193,7 @@ export async function recomputeDailyMetrics(): Promise<void> {
       SELECT
         w.date,
         CASE
-          WHEN m.label IS NOT NULL THEN m.label
+          WHEN coalesce(m.label,'') <> '' THEN m.label
           WHEN lower(coalesce(w.traffic_source,'')) = 'organic' THEN 'SEO (органика)'
           WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(w.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'

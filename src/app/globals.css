@@ -82,6 +82,20 @@ body {
   color: var(--muted);
   cursor: default;
 }
+.src-hide {
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+.src-hide:hover {
+  color: var(--red);
+  border-color: rgba(255, 89, 100, 0.3);
+}
 
 .header {
   display: flex;
