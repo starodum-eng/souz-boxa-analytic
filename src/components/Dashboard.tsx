@@ -33,6 +33,7 @@ interface SourceRow {
   source: string;
   cost: number;
   leads: number;
+  clients: number;
   sales_count: number;
   revenue: number;
   cpl: number | null;
@@ -185,6 +186,7 @@ export default function Dashboard() {
                   <th>Расход</th>
                   <th>Лиды</th>
                   <th>CPL</th>
+                  <th>Клиенты</th>
                   <th>Продажи</th>
                   <th>CAC</th>
                   <th>Выручка</th>
@@ -198,6 +200,7 @@ export default function Dashboard() {
                     <td>{rub(s.cost)}</td>
                     <td>{num(s.leads)}</td>
                     <td>{s.cpl != null ? rub(s.cpl) : "—"}</td>
+                    <td>{num(s.clients)}</td>
                     <td>{num(s.sales_count)}</td>
                     <td>{s.cac != null ? rub(s.cac) : "—"}</td>
                     <td>{rub(s.revenue)}</td>
@@ -208,7 +211,7 @@ export default function Dashboard() {
                 ))}
                 {data.bySource.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                    <td colSpan={9} className="muted">Нет данных за период. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>

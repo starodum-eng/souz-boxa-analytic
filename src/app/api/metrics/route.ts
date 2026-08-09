@@ -41,6 +41,33 @@ export async function GET(req: Request) {
     ORDER BY cost DESC
   `);
 
+  // Клиенты, привязанные к каналу по телефону (склейка Fitbase ↔ касания форм/Callibri).
+  // Берём первое касание по номеру телефона, из него — источник.
+  const clientsBySource = await db.execute(sql`
+    WITH ft AS (
+      SELECT DISTINCT ON (phone_norm)
+        phone_norm, lower(utm_source) AS utm_source
+      FROM lead_touches
+      WHERE phone_norm IS NOT NULL AND coalesce(utm_source,'') <> ''
+      ORDER BY phone_norm, created_at ASC
+    ),
+    matched AS (
+      SELECT
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN ft.utm_source LIKE '%yandex%' OR ft.utm_source LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN ft.utm_source LIKE '%vk%' THEN 'VK Реклама'
+          ELSE 'Сайт (прочее)'
+        END AS source
+      FROM clients c
+      JOIN ft ON ft.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
+      LEFT JOIN source_mappings m ON m.utm_source = ft.utm_source
+      WHERE c.created_at >= CURRENT_DATE - ${days}::int
+    )
+    SELECT source, COUNT(*)::int AS clients
+    FROM matched GROUP BY source
+  `);
+
   // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
   // плюс новые клиенты Fitbase по дате регистрации).
   const byDate = await db.execute(sql`
@@ -104,9 +131,35 @@ export async function GET(req: Request) {
     ORDER BY finished_at DESC NULLS LAST
   `);
 
+  // Слияние привязанных клиентов в разбивку по источникам.
+  const clientMap = new Map<string, number>(
+    clientsBySource.rows.map((r: Record<string, unknown>) => [String(r.source), Number(r.clients)]),
+  );
+  const bySourceMerged: Record<string, unknown>[] = bySource.rows.map((r: Record<string, unknown>) => ({
+    ...r,
+    clients: clientMap.get(String(r.source)) ?? 0,
+  }));
+  // Каналы, у которых есть привязанные клиенты, но нет строки в витрине — добавляем.
+  const seen = new Set(bySourceMerged.map((r) => String(r.source)));
+  for (const [source, clients] of clientMap) {
+    if (!seen.has(source)) {
+      bySourceMerged.push({
+        source,
+        cost: 0,
+        leads: 0,
+        sales_count: 0,
+        revenue: 0,
+        cpl: null,
+        cac: null,
+        romi: null,
+        clients,
+      });
+    }
+  }
+
   return NextResponse.json({
     totals: { ...(totals.rows[0] ?? {}), new_clients: clientsAgg.rows[0]?.new_clients ?? 0 },
-    bySource: bySource.rows,
+    bySource: bySourceMerged,
     byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,
