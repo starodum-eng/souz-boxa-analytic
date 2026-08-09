@@ -215,6 +215,24 @@ export default function Dashboard() {
                   </tr>
                 )}
               </tbody>
+              {data.bySource.length > 0 && (() => {
+                const t = sumMetrics(data.bySource);
+                return (
+                  <tfoot>
+                    <tr className="total-row">
+                      <td>Всего</td>
+                      <td>{rub(t.cost)}</td>
+                      <td>{num(t.leads)}</td>
+                      <td>{t.cpl != null ? rub(t.cpl) : "—"}</td>
+                      <td>{num(t.clients)}</td>
+                      <td>{num(t.sales_count)}</td>
+                      <td>{t.cac != null ? rub(t.cac) : "—"}</td>
+                      <td>{rub(t.revenue)}</td>
+                      <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
 
@@ -256,6 +274,24 @@ export default function Dashboard() {
                   </tr>
                 )}
               </tbody>
+              {data.byDate.length > 0 && (() => {
+                const t = sumMetrics(data.byDate);
+                return (
+                  <tfoot>
+                    <tr className="total-row">
+                      <td>Всего</td>
+                      <td>{rub(t.cost)}</td>
+                      <td>{num(t.leads)}</td>
+                      <td>{t.cpl != null ? rub(t.cpl) : "—"}</td>
+                      <td>{num(t.clients)}</td>
+                      <td>{num(t.sales_count)}</td>
+                      <td>{t.cac != null ? rub(t.cac) : "—"}</td>
+                      <td>{rub(t.revenue)}</td>
+                      <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
 
@@ -299,6 +335,26 @@ export default function Dashboard() {
       )}
     </div>
   );
+}
+
+/** Сумма показателей строк; производные (CPL/CAC/ROMI) считаются от итогов. */
+function sumMetrics(rows: Array<{ cost: number; leads: number; clients: number; sales_count: number; revenue: number }>) {
+  const n = (v: unknown) => Number(v) || 0;
+  const cost = rows.reduce((a, r) => a + n(r.cost), 0);
+  const leads = rows.reduce((a, r) => a + n(r.leads), 0);
+  const clients = rows.reduce((a, r) => a + n(r.clients), 0);
+  const sales_count = rows.reduce((a, r) => a + n(r.sales_count), 0);
+  const revenue = rows.reduce((a, r) => a + n(r.revenue), 0);
+  return {
+    cost,
+    leads,
+    clients,
+    sales_count,
+    revenue,
+    cpl: leads > 0 ? cost / leads : null,
+    cac: sales_count > 0 ? cost / sales_count : null,
+    romi: cost > 0 ? (revenue - cost) / cost : null,
+  };
 }
 
 function Kpi({ label, value, className }: { label: string; value: string; className?: string }) {

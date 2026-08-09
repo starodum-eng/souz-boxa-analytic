@@ -249,6 +249,13 @@ td:first-child {
 tbody tr:last-child td {
   border-bottom: none;
 }
+tfoot .total-row td {
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.02);
+}
 tbody tr:hover td {
   background: rgba(255, 255, 255, 0.02);
 }
