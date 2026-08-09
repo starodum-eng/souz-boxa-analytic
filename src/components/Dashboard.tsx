@@ -111,8 +111,8 @@ export default function Dashboard() {
     <div className="container">
       <div className="header">
         <div>
-          <h1>Союз-Бокса · Сквозная аналитика</h1>
-          <div className="sub">Реклама → визиты → лиды → продажи. Данные обновляются раз в сутки.</div>
+          <h1>Обзор</h1>
+          <div className="sub">Реклама → визиты → лиды → клиенты. Данные обновляются раз в сутки.</div>
         </div>
         <div className="controls">
           {RANGES.map((r) => (
@@ -146,19 +146,19 @@ export default function Dashboard() {
             <div className="chart-wrap">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={data.timeline}>
-                  <CartesianGrid stroke="#262d3a" strokeDasharray="3 3" />
-                  <XAxis dataKey="date" stroke="#8a93a6" fontSize={12} />
-                  <YAxis stroke="#8a93a6" fontSize={12} />
+                  <CartesianGrid stroke="#38302a" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" stroke="#a8998c" fontSize={12} />
+                  <YAxis stroke="#a8998c" fontSize={12} />
                   <Tooltip
-                    contentStyle={{ background: "#141922", border: "1px solid #262d3a", borderRadius: 8 }}
+                    contentStyle={{ background: "#201a16", border: "1px solid #38302a", borderRadius: 8 }}
                     formatter={(v: number, name) =>
                       name === "Лиды" ? num(v) : rub(v)
                     }
                   />
                   <Legend />
-                  <Line type="monotone" dataKey="cost" name="Расход" stroke="#e23b3b" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="revenue" name="Выручка" stroke="#2ecc71" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="leads" name="Лиды" stroke="#4d9fff" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="cost" name="Расход" stroke="#e0271b" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="revenue" name="Выручка" stroke="#46c07a" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="leads" name="Лиды" stroke="#e0a53b" dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
