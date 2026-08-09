@@ -17,8 +17,8 @@ export interface SyncResult {
   message?: string;
 }
 
-/** Окно синхронизации по умолчанию — последние 30 дней (перезаписываем витрину). */
-const SYNC_WINDOW_DAYS = 30;
+/** Окно синхронизации — 95 дней, чтобы покрыть 90-дневный фильтр дашборда. */
+const SYNC_WINDOW_DAYS = Number(process.env.SYNC_WINDOW_DAYS) || 95;
 
 export async function runFullSync(): Promise<SyncResult[]> {
   const range = lastNDays(SYNC_WINDOW_DAYS);
