@@ -167,64 +167,52 @@ export async function recomputeDailyMetrics(): Promise<void> {
   // Полностью пересобираем витрину из сырья — просто и надёжно для текущих объёмов.
   await db.execute(sql`DELETE FROM daily_metrics`);
 
-  // 1) Расходы рекламных источников (Директ, VK) + переносим визиты/лиды из Метрики по utm.
+  // 1) Расходы рекламных источников (Директ, VK). Enum-источник → подпись канала.
   await db.execute(sql`
     INSERT INTO daily_metrics (date, source, cost, impressions, clicks, visits, leads, sales_count, revenue)
     SELECT
       s.date,
-      s.source,
+      CASE s.source
+        WHEN 'yandex_direct' THEN 'Яндекс.Директ'
+        WHEN 'vk_ads' THEN 'VK Реклама'
+        ELSE s.source::text
+      END AS source,
       COALESCE(SUM(s.cost), 0)        AS cost,
       COALESCE(SUM(s.impressions), 0) AS impressions,
       COALESCE(SUM(s.clicks), 0)      AS clicks,
       0, 0, 0, 0
     FROM ad_spend s
-    GROUP BY s.date, s.source
+    GROUP BY 1, 2
   `);
 
-  // 2) Визиты и достижения целей из Метрики, разложенные по каналам.
-  //    Платный Директ: utm_source ~ 'yandex'; VK: utm_source ~ 'vk';
-  //    остальное (органика/прямой/реферальный трафик) → источник 'site'.
+  // 2) Визиты и цели из Метрики → канал.
+  //    Приоритет: справочник source_mappings > органика/прямые (тип трафика) >
+  //    встроенные правила Директ/VK по utm_source > сырой utm_source > «Сайт (прочее)».
   await db.execute(sql`
     WITH web AS (
       SELECT
-        date,
+        w.date,
         CASE
-          WHEN lower(coalesce(utm_source,'')) LIKE '%yandex%' OR lower(coalesce(utm_source,'')) LIKE '%direct%' THEN 'yandex_direct'
-          WHEN lower(coalesce(utm_source,'')) LIKE '%vk%' THEN 'vk_ads'
-          WHEN lower(coalesce(traffic_source,'')) = 'organic' THEN 'seo'
-          WHEN lower(coalesce(traffic_source,'')) = 'direct' THEN 'direct'
-          ELSE 'site'
-        END::source AS source,
-        SUM(visits) AS visits,
-        SUM(goal_reaches) AS leads
-      FROM web_sessions
+          WHEN m.label IS NOT NULL THEN m.label
+          WHEN lower(coalesce(w.traffic_source,'')) = 'organic' THEN 'SEO (органика)'
+          WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
+          WHEN lower(coalesce(w.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(w.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(coalesce(w.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
+          WHEN coalesce(w.utm_source,'') <> '' THEN w.utm_source
+          ELSE 'Сайт (прочее)'
+        END AS source,
+        SUM(w.visits) AS visits,
+        SUM(w.goal_reaches) AS leads
+      FROM web_sessions w
+      LEFT JOIN source_mappings m
+        ON coalesce(w.utm_source,'') <> '' AND m.utm_source = lower(w.utm_source)
       GROUP BY 1, 2
     )
     INSERT INTO daily_metrics (date, source, visits, leads)
     SELECT date, source, visits, leads FROM web
     ON CONFLICT (date, source) DO UPDATE
-      SET visits = EXCLUDED.visits, leads = EXCLUDED.leads
-  `);
-
-  // 3) Продажи Fitbase, разнесённые по каналам через utm_source.
-  await db.execute(sql`
-    WITH s AS (
-      SELECT
-        date,
-        CASE
-          WHEN lower(coalesce(utm_source,'')) LIKE '%yandex%' OR lower(coalesce(utm_source,'')) LIKE '%direct%' THEN 'yandex_direct'
-          WHEN lower(coalesce(utm_source,'')) LIKE '%vk%' THEN 'vk_ads'
-          ELSE 'fitbase'
-        END::source AS source,
-        COUNT(*) AS sales_count,
-        SUM(amount) AS revenue
-      FROM sales
-      GROUP BY 1, 2
-    )
-    INSERT INTO daily_metrics (date, source, sales_count, revenue)
-    SELECT date, source, sales_count, revenue FROM s
-    ON CONFLICT (date, source) DO UPDATE
-      SET sales_count = EXCLUDED.sales_count, revenue = EXCLUDED.revenue
+      SET visits = daily_metrics.visits + EXCLUDED.visits,
+          leads  = daily_metrics.leads  + EXCLUDED.leads
   `);
 
   // 4) Производные метрики: CPL, CAC, ROMI.

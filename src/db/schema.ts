@@ -137,7 +137,9 @@ export const dailyMetrics = pgTable(
   {
     id: serial("id").primaryKey(),
     date: date("date").notNull(),
-    source: sourceEnum("source").notNull(),
+    // Канал как текст (человекочитаемая подпись), а не enum — чтобы поддержать
+    // произвольные источники из справочника source_mappings.
+    source: varchar("source", { length: 256 }).notNull(),
     cost: numeric("cost", { precision: 14, scale: 2 }).notNull().default("0"),
     impressions: integer("impressions").notNull().default(0),
     clicks: integer("clicks").notNull().default(0),
@@ -168,6 +170,20 @@ export const syncLog = pgTable("sync_log", {
   message: varchar("message", { length: 1024 }),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+/**
+ * Справочник соответствий UTM-метка → человекочитаемый канал.
+ * Заполняется на вкладке «Источники»: незнакомым utm_source присваивается
+ * название, которое показывается на дашборде (напр. reklamavliftah → «Реклама в лифтах»).
+ */
+export const sourceMappings = pgTable("source_mappings", {
+  id: serial("id").primaryKey(),
+  utmSource: varchar("utm_source", { length: 256 }).notNull().unique(), // хранится в lower-case
+  label: varchar("label", { length: 256 }).notNull(),
+  isPaid: integer("is_paid").notNull().default(0), // 1 — платный канал (для будущей группировки)
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**

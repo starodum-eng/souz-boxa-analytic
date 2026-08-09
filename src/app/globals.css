@@ -30,6 +30,59 @@ body {
   padding: 28px 20px 60px;
 }
 
+.tabbar {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.tabbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.src-input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  width: 100%;
+  max-width: 280px;
+}
+.src-save {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.src-save:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: default;
+}
+
 .header {
   display: flex;
   align-items: baseline;
