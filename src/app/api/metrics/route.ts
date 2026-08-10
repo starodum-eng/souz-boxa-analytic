@@ -53,82 +53,65 @@ export async function GET(req: Request) {
     ORDER BY cost DESC
   `);
 
-  // Двойная ловушка UTM + деньги: канал клиента определяется по приоритету
-  //   1) UTM из лида Fitbase  2) UTM из нашего трекера форм (по телефону)
-  //   3) advertising_source Fitbase  4) «Не определён».
-  // LTV = сумма абонементов. Когорта — по дате регистрации клиента в периоде.
+  // Когорта по дате ПЕРВОГО обращения из канала (вариант 3):
+  // собираем все обращения клиента (UTM из трекера/Callibri по телефону,
+  // UTM и advertising_source из лидов Fitbase), берём самое раннее — оно
+  // задаёт и канал, и дату когорты. LTV = сумма абонементов клиента.
   const clientRevBySource = await db.execute(sql`
-    WITH fb_utm AS (
-      SELECT DISTINCT ON (client_id) client_id, lower(utm_source) AS utm_source
-      FROM fitbase_leads
-      WHERE client_id IS NOT NULL AND coalesce(utm_source,'') <> ''
-      ORDER BY client_id, created_at ASC NULLS LAST
+    WITH touches AS (
+      -- обращения из lead_touches (Callibri + формы) с UTM, привязка по телефону
+      SELECT c.fitbase_id AS client_id, lt.created_at AS ts,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(lt.utm_source) LIKE '%yandex%' OR lower(lt.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(lt.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE lt.utm_source
+        END AS source
+      FROM lead_touches lt
+      JOIN clients c ON right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10) = lt.phone_norm
+      LEFT JOIN source_mappings m ON m.utm_source = lower(lt.utm_source)
+      WHERE lt.phone_norm IS NOT NULL AND coalesce(lt.utm_source,'') <> ''
+
+      UNION ALL
+      -- лиды Fitbase с UTM
+      SELECT fl.client_id, fl.created_at,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(fl.utm_source) LIKE '%yandex%' OR lower(fl.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(fl.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE fl.utm_source
+        END
+      FROM fitbase_leads fl
+      LEFT JOIN source_mappings m ON m.utm_source = lower(fl.utm_source)
+      WHERE fl.client_id IS NOT NULL AND coalesce(fl.utm_source,'') <> ''
+
+      UNION ALL
+      -- лиды Fitbase без UTM → по advertising_source
+      SELECT fl.client_id, fl.created_at,
+        CASE WHEN lower(fl.advertising_source) LIKE '%вконтакте%' THEN 'VK Реклама' ELSE fl.advertising_source END
+      FROM fitbase_leads fl
+      WHERE fl.client_id IS NOT NULL AND coalesce(fl.advertising_source,'') <> ''
     ),
-    fb_adv AS (
-      SELECT DISTINCT ON (client_id) client_id, advertising_source
-      FROM fitbase_leads
-      WHERE client_id IS NOT NULL
-      ORDER BY client_id, created_at ASC NULLS LAST
-    ),
-    tracker AS (
-      SELECT DISTINCT ON (phone_norm) phone_norm, lower(utm_source) AS utm_source
-      FROM lead_touches
-      WHERE phone_norm IS NOT NULL AND coalesce(utm_source,'') <> ''
-      ORDER BY phone_norm, created_at ASC
+    first_touch AS (
+      SELECT DISTINCT ON (client_id) client_id, ts, source
+      FROM touches
+      WHERE coalesce(source,'') <> ''
+      ORDER BY client_id, ts ASC NULLS LAST
     ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
       FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
-    ),
-    resolved AS (
-      SELECT
-        c.fitbase_id AS client_id,
-        (c.created_at AT TIME ZONE 'Europe/Moscow')::date AS reg_date,
-        COALESCE(l.ltv, 0) AS ltv,
-        COALESCE(fu.utm_source, tr.utm_source) AS utm_source,
-        fa.advertising_source
-      FROM clients c
-      LEFT JOIN ltv l ON l.client_id = c.fitbase_id
-      LEFT JOIN fb_utm fu ON fu.client_id = c.fitbase_id
-      LEFT JOIN tracker tr ON tr.phone_norm = right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10)
-      LEFT JOIN fb_adv fa ON fa.client_id = c.fitbase_id
-    ),
-    channeled AS (
-      SELECT
-        r.reg_date, r.ltv,
-        CASE
-          WHEN coalesce(m.label,'') <> '' THEN m.label
-          WHEN r.utm_source LIKE '%yandex%' OR r.utm_source LIKE '%direct%' THEN 'Яндекс.Директ'
-          WHEN r.utm_source LIKE '%vk%' THEN 'VK Реклама'
-          WHEN coalesce(r.utm_source,'') <> '' THEN r.utm_source
-          WHEN lower(coalesce(r.advertising_source,'')) LIKE '%вконтакте%' THEN 'VK Реклама'
-          WHEN coalesce(r.advertising_source,'') <> '' THEN r.advertising_source
-          ELSE 'Не определён'
-        END AS source
-      FROM resolved r
-      LEFT JOIN source_mappings m ON coalesce(r.utm_source,'') <> '' AND m.utm_source = r.utm_source
     )
     SELECT
-      source,
+      ft.source,
       COUNT(*)::int AS clients,
-      COUNT(*) FILTER (WHERE ltv > 0)::int AS paying,
-      COALESCE(SUM(ltv), 0) AS revenue
-    FROM channeled
-    WHERE reg_date >= ${from} AND reg_date <= ${to}
-    GROUP BY source
-  `);
-
-  // Общая выручка (LTV) когорты за период — для KPI и общего ROMI.
-  const revenueTotalRes = await db.execute(sql`
-    WITH ltv AS (
-      SELECT client_id, SUM(amount) AS ltv
-      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
-    )
-    SELECT COALESCE(SUM(l.ltv), 0) AS revenue
-    FROM clients c
-    JOIN ltv l ON l.client_id = c.fitbase_id
-    WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-      AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0)::int AS paying,
+      COALESCE(SUM(l.ltv), 0) AS revenue
+    FROM first_touch ft
+    LEFT JOIN ltv l ON l.client_id = ft.client_id
+    WHERE (ft.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (ft.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+    GROUP BY ft.source
   `);
 
   // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
@@ -229,7 +212,8 @@ export async function GET(req: Request) {
   });
   bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
 
-  const revenueTotal = Number(revenueTotalRes.rows[0]?.revenue ?? 0);
+  // Общая выручка = сумма LTV по каналам (когорта первого обращения).
+  const revenueTotal = bySourceMerged.reduce((a, r) => a + Number(r.revenue || 0), 0);
 
   return NextResponse.json({
     totals: {

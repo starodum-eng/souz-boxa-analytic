@@ -128,14 +128,23 @@ function presetRange(key: PresetKey): { from: string; to: string } {
 }
 
 export default function Dashboard() {
-  const [preset, setPreset] = useState<PresetKey>("30d");
+  const initial = presetRange("30d");
+  const [preset, setPreset] = useState<PresetKey | "custom">("30d");
+  const [from, setFrom] = useState<string>(initial.from);
+  const [to, setTo] = useState<string>(initial.to);
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
+  function applyPreset(key: PresetKey) {
+    const r = presetRange(key);
+    setPreset(key);
+    setFrom(r.from);
+    setTo(r.to);
+  }
+
   function loadMetrics() {
-    const { from, to } = presetRange(preset);
     return fetch(`/api/metrics?from=${from}&to=${to}`)
       .then((r) => r.json())
       .then(setData)
@@ -147,7 +156,7 @@ export default function Dashboard() {
     setError(null);
     loadMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset]);
+  }, [from, to]);
 
   async function handleSync() {
     setSyncing(true);
@@ -182,7 +191,7 @@ export default function Dashboard() {
         </div>
         <div className="controls">
           {PRESETS.map((p) => (
-            <button key={p.key} className={p.key === preset ? "active" : ""} onClick={() => setPreset(p.key)}>
+            <button key={p.key} className={p.key === preset ? "active" : ""} onClick={() => applyPreset(p.key)}>
               {p.label}
             </button>
           ))}
@@ -190,6 +199,24 @@ export default function Dashboard() {
             {syncing ? "Обновление…" : "Обновить данные"}
           </button>
         </div>
+      </div>
+
+      <div className="daterange">
+        <span className="muted">Период:</span>
+        <input
+          type="date"
+          value={from}
+          max={to}
+          onChange={(e) => { setPreset("custom"); setFrom(e.target.value); }}
+        />
+        <span className="muted">—</span>
+        <input
+          type="date"
+          value={to}
+          min={from}
+          onChange={(e) => { setPreset("custom"); setTo(e.target.value); }}
+        />
+        {preset === "custom" && <span className="badge">свой период</span>}
       </div>
 
       {syncMsg && <div className="card muted" style={{ marginBottom: 16 }}>{syncMsg}</div>}
@@ -230,7 +257,9 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="section-title">По источникам · {PRESETS.find((p) => p.key === preset)?.label}</div>
+          <div className="section-title">
+            По источникам · {PRESETS.find((p) => p.key === preset)?.label ?? `${from} — ${to}`}
+          </div>
           <div className="card">
             <table>
               <thead>

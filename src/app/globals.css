@@ -116,6 +116,24 @@ body {
   border-bottom-color: var(--accent);
 }
 
+.daterange {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0 20px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.daterange input[type="date"] {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+
 .src-input {
   background: var(--panel-2);
   border: 1px solid var(--border);
