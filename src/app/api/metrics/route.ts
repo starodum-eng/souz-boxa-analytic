@@ -114,6 +114,60 @@ export async function GET(req: Request) {
     GROUP BY ft.source
   `);
 
+  // Влияние каналов: клиенты, которые КАСАЛИСЬ канала за период (не обязательно
+  // первым касанием), и их LTV. Деньги пересекаются между каналами (multi-touch).
+  const channelInfluence = await db.execute(sql`
+    WITH touches AS (
+      SELECT c.fitbase_id AS client_id, lt.created_at AS ts,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(lt.utm_source) LIKE '%yandex%' OR lower(lt.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(lt.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE lt.utm_source
+        END AS source
+      FROM lead_touches lt
+      JOIN clients c ON right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10) = lt.phone_norm
+      LEFT JOIN source_mappings m ON m.utm_source = lower(lt.utm_source)
+      WHERE lt.phone_norm IS NOT NULL AND coalesce(lt.utm_source,'') <> ''
+      UNION ALL
+      SELECT fl.client_id, fl.created_at,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(fl.utm_source) LIKE '%yandex%' OR lower(fl.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(fl.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE fl.utm_source
+        END
+      FROM fitbase_leads fl
+      LEFT JOIN source_mappings m ON m.utm_source = lower(fl.utm_source)
+      WHERE fl.client_id IS NOT NULL AND coalesce(fl.utm_source,'') <> ''
+      UNION ALL
+      SELECT fl.client_id, fl.created_at,
+        CASE WHEN lower(fl.advertising_source) LIKE '%вконтакте%' THEN 'VK Реклама' ELSE fl.advertising_source END
+      FROM fitbase_leads fl
+      WHERE fl.client_id IS NOT NULL AND coalesce(fl.advertising_source,'') <> ''
+    ),
+    in_period AS (
+      SELECT DISTINCT client_id, source
+      FROM touches
+      WHERE coalesce(source,'') <> ''
+        AND (ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+    ),
+    ltv AS (
+      SELECT client_id, SUM(amount) AS ltv
+      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+    )
+    SELECT
+      ip.source,
+      COUNT(DISTINCT ip.client_id)::int AS clients,
+      COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0)::int AS paying,
+      COALESCE(SUM(l.ltv), 0) AS revenue
+    FROM in_period ip
+    LEFT JOIN ltv l ON l.client_id = ip.client_id
+    GROUP BY ip.source
+    ORDER BY revenue DESC
+  `);
+
   // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
   // плюс новые клиенты Fitbase по дате регистрации).
   const byDate = await db.execute(sql`
@@ -223,6 +277,7 @@ export async function GET(req: Request) {
       revenue: revenueTotal,
     },
     bySource: bySourceMerged,
+    channelInfluence: channelInfluence.rows,
     byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,

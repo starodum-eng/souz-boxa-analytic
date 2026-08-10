@@ -40,6 +40,12 @@ interface SourceRow {
   cac: number | null;
   romi: number | null;
 }
+interface InfluenceRow {
+  source: string;
+  clients: number;
+  paying: number;
+  revenue: number;
+}
 interface DateRow {
   date: string;
   cost: number;
@@ -68,6 +74,7 @@ interface SyncRow {
 interface Data {
   totals: Totals;
   bySource: SourceRow[];
+  channelInfluence: InfluenceRow[];
   byDate: DateRow[];
   timeline: TimePoint[];
   lastSync: SyncRow[];
@@ -315,6 +322,40 @@ export default function Dashboard() {
                   </tfoot>
                 );
               })()}
+            </table>
+          </div>
+
+          <div className="section-title">Влияние каналов · касания за период</div>
+          <div className="card">
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              Клиенты, которые <b>касались</b> канала в периоде (не обязательно первым касанием), и их LTV.
+              Показывает реальное влияние канала. Один клиент может попасть в несколько каналов —
+              поэтому выручка здесь <b>пересекается</b> между каналами и не суммируется в общий итог.
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Канал</th>
+                  <th>Коснулось клиентов</th>
+                  <th>Оплатили</th>
+                  <th>Их LTV (influence)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.channelInfluence.map((r) => (
+                  <tr key={r.source}>
+                    <td>{SOURCE_LABEL[r.source] ?? r.source}</td>
+                    <td>{num(r.clients)}</td>
+                    <td>{num(r.paying)}</td>
+                    <td>{rub(r.revenue)}</td>
+                  </tr>
+                ))}
+                {data.channelInfluence.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="muted">Нет данных за период.</td>
+                  </tr>
+                )}
+              </tbody>
             </table>
           </div>
 
