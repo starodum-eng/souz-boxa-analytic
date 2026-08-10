@@ -84,6 +84,14 @@ export interface FitbaseContractRow {
   raw?: unknown;
 }
 
+/** Визит клиента Fitbase (/v2/client/visits) — посещаемость. */
+export interface FitbaseVisitRow {
+  fitbaseId: string;
+  clientId: string | null;
+  startAt: Date | null;
+  raw?: unknown;
+}
+
 export type SourceKey =
   | "yandex_direct"
   | "yandex_metrika"

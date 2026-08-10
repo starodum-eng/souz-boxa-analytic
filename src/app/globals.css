@@ -274,6 +274,31 @@ tfoot .total-row td {
   color: var(--text);
   background: rgba(255, 255, 255, 0.02);
 }
+
+/* Двублочная таблица «По дням»: маркетинг слева, Fitbase справа */
+.split-table .grp {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.split-table .grp-mkt {
+  color: var(--accent);
+  border-bottom: 2px solid rgba(224, 39, 27, 0.35);
+}
+.split-table .grp-fb {
+  color: var(--gold);
+  border-bottom: 2px solid rgba(224, 165, 59, 0.35);
+}
+.split-table .col-fb {
+  background: rgba(224, 165, 59, 0.06);
+}
+.split-table th.col-fb {
+  color: var(--gold);
+}
+.split-table td.col-fb:first-of-type,
+.split-table th.col-fb:first-of-type {
+  border-left: 1px solid var(--border);
+}
 tbody tr:hover td {
   background: rgba(255, 255, 255, 0.02);
 }

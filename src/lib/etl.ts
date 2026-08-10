@@ -4,11 +4,11 @@ import { lastNDays, type SourceKey } from "@/integrations/types";
 import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
 import { fetchYandexMetrika } from "@/integrations/yandex-metrika";
 import { fetchVkAdsSpend } from "@/integrations/vk-ads";
-import { fetchFitbaseClients, fetchFitbaseLeads, fetchFitbaseContracts } from "@/integrations/fitbase";
+import { fetchFitbaseClients, fetchFitbaseLeads, fetchFitbaseContracts, fetchFitbaseVisits } from "@/integrations/fitbase";
 import { fetchCallibri } from "@/integrations/callibri";
 import { normalizePhone } from "@/lib/phone";
 
-const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, leadTouches, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, clientVisits, leadTouches, dailyMetrics, syncLog } = schema;
 
 export interface SyncResult {
   source: SourceKey;
@@ -191,7 +191,24 @@ export async function runFullSync(): Promise<SyncResult[]> {
         });
     }
 
-    return clientRows.length + leadRows.length + contractRows.length;
+    // Визиты (посещаемость).
+    const visitRows = dedupe((await fetchFitbaseVisits(range)).filter((v) => v.fitbaseId));
+    for (let i = 0; i < visitRows.length; i += CHUNK) {
+      const batch = visitRows.slice(i, i + CHUNK);
+      await db
+        .insert(clientVisits)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [clientVisits.fitbaseId],
+          set: {
+            clientId: sql`excluded.client_id`,
+            startAt: sql`excluded.start_at`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    return clientRows.length + leadRows.length + contractRows.length + visitRows.length;
   }));
 
   results.push(await guarded("callibri", async () => {

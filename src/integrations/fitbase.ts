@@ -1,4 +1,4 @@
-import type { ClientRow, DateRange, FitbaseLeadRow, FitbaseContractRow } from "./types";
+import type { ClientRow, DateRange, FitbaseLeadRow, FitbaseContractRow, FitbaseVisitRow } from "./types";
 import { normalizePhone } from "@/lib/phone";
 
 /**
@@ -131,6 +131,18 @@ export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadR
     budget: Number(l.budget) || 0,
     createdAt: toDate(l.created_at),
     raw: l,
+  }));
+}
+
+/** Визиты клиентов (/v2/client/visits) — посещаемость. Тянем недавние по updated_at. */
+export async function fetchFitbaseVisits(range: DateRange): Promise<FitbaseVisitRow[]> {
+  const fromUnix = Math.floor(new Date(`${range.from}T00:00:00Z`).getTime() / 1000);
+  const items = await fetchAllPages(`/client/visits?updated_at=${fromUnix}`, "/client/visits");
+  return items.map((v) => ({
+    fitbaseId: String(v.id ?? ""),
+    clientId: v.client_id != null ? String(v.client_id) : null,
+    startAt: toDate(v.start_at),
+    raw: v,
   }));
 }
 

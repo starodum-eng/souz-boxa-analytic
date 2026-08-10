@@ -182,6 +182,25 @@ export const clientContracts = pgTable(
 );
 
 /**
+ * Визиты клиентов Fitbase (/v2/client/visits) — посещаемость по дням.
+ */
+export const clientVisits = pgTable(
+  "client_visits",
+  {
+    id: serial("id").primaryKey(),
+    fitbaseId: varchar("fitbase_id", { length: 128 }).notNull(),
+    clientId: varchar("client_id", { length: 128 }),
+    startAt: timestamp("start_at", { withTimezone: true }),
+    raw: jsonb("raw"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("client_visits_uniq").on(t.fitbaseId),
+    index("client_visits_start_idx").on(t.startAt),
+  ],
+);
+
+/**
  * Витрина: агрегат по дню × источнику для быстрого чтения дашбордом.
  * Пересчитывается ETL-оркестратором после загрузки сырых данных.
  * Хранит и абсолютные метрики, и производные (CPL, CAC, ROMI).

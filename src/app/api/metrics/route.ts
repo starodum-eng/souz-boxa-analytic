@@ -190,35 +190,47 @@ export async function GET(req: Request) {
     ORDER BY revenue DESC
   `);
 
-  // Сводка по дням за последние 5 дней (те же метрики, что и по источникам,
-  // плюс новые клиенты Fitbase по дате регистрации).
+  // Сводка по дням за 5 дней. Левая часть — маркетинг (расход/лиды/клиенты),
+  // правая — Fitbase (продажи/выручка по дате платежа + посещения).
   const byDate = await db.execute(sql`
     WITH dm AS (
-      SELECT date,
-        SUM(cost) AS cost, SUM(leads) AS leads,
-        SUM(sales_count) AS sales_count, SUM(revenue) AS revenue
+      SELECT date, SUM(cost) AS cost, SUM(leads) AS leads
       FROM daily_metrics GROUP BY date
     ),
     cl AS (
       SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS clients
       FROM clients WHERE created_at IS NOT NULL GROUP BY 1
     ),
+    sales AS (
+      SELECT (payment_date AT TIME ZONE 'Europe/Moscow')::date AS date,
+        COUNT(*) AS sales_count, SUM(amount) AS revenue
+      FROM client_contracts
+      WHERE paid = 1 AND payment_date IS NOT NULL GROUP BY 1
+    ),
+    vis AS (
+      SELECT (start_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS visits
+      FROM client_visits WHERE start_at IS NOT NULL GROUP BY 1
+    ),
     dates AS (
-      SELECT date FROM dm UNION SELECT date FROM cl
+      SELECT date FROM dm
+      UNION SELECT date FROM cl
+      UNION SELECT date FROM sales
+      UNION SELECT date FROM vis
     )
     SELECT
       d.date,
-      COALESCE(dm.cost, 0)        AS cost,
-      COALESCE(dm.leads, 0)       AS leads,
-      COALESCE(dm.sales_count, 0) AS sales_count,
-      COALESCE(dm.revenue, 0)     AS revenue,
-      COALESCE(cl.clients, 0)     AS clients,
+      COALESCE(dm.cost, 0)         AS cost,
+      COALESCE(dm.leads, 0)        AS leads,
       CASE WHEN dm.leads > 0 THEN ROUND(dm.cost/dm.leads, 2) END AS cpl,
-      CASE WHEN dm.sales_count > 0 THEN ROUND(dm.cost/dm.sales_count, 2) END AS cac,
-      CASE WHEN dm.cost > 0 THEN ROUND((dm.revenue-dm.cost)/dm.cost, 4) END AS romi
+      COALESCE(cl.clients, 0)      AS clients,
+      COALESCE(sales.sales_count, 0) AS sales_count,
+      COALESCE(sales.revenue, 0)   AS revenue,
+      COALESCE(vis.visits, 0)      AS visits
     FROM dates d
     LEFT JOIN dm ON dm.date = d.date
     LEFT JOIN cl ON cl.date = d.date
+    LEFT JOIN sales ON sales.date = d.date
+    LEFT JOIN vis ON vis.date = d.date
     ORDER BY d.date DESC
     LIMIT 5
   `);

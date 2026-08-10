@@ -50,14 +50,15 @@ interface InfluenceRow {
 }
 interface DateRow {
   date: string;
+  // левая часть — маркетинг
   cost: number;
   leads: number;
+  cpl: number | null;
   clients: number;
+  // правая часть — Fitbase
   sales_count: number;
   revenue: number;
-  cpl: number | null;
-  cac: number | null;
-  romi: number | null;
+  visits: number;
 }
 interface TimePoint {
   date: string;
@@ -366,61 +367,68 @@ export default function Dashboard() {
 
           <div className="section-title">По дням (5 дней)</div>
           <div className="card">
-            <table>
-              <thead>
-                <tr>
-                  <th>Дата</th>
-                  <th>Расход</th>
-                  <th>Лиды</th>
-                  <th>CPL</th>
-                  <th>Клиенты</th>
-                  <th>Продажи</th>
-                  <th>CAC</th>
-                  <th>Выручка</th>
-                  <th>ROMI</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.byDate.map((d) => (
-                  <tr key={d.date}>
-                    <td>{new Date(d.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", weekday: "short" })}</td>
-                    <td>{rub(d.cost)}</td>
-                    <td>{num(d.leads)}</td>
-                    <td>{d.cpl != null ? rub(d.cpl) : "—"}</td>
-                    <td>{num(d.clients)}</td>
-                    <td>{num(d.sales_count)}</td>
-                    <td>{d.cac != null ? rub(d.cac) : "—"}</td>
-                    <td>{rub(d.revenue)}</td>
-                    <td className={d.romi != null ? (Number(d.romi) >= 0 ? "pos" : "neg") : "muted"}>
-                      {pct(d.romi)}
-                    </td>
-                  </tr>
-                ))}
-                {data.byDate.length === 0 && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
+              <b style={{ color: "var(--accent)" }}>Слева — маркетинг/лиды</b> (из рекламы и Метрики):
+              расход, заявки-лиды, цена лида и новые клиенты клуба.
+              <b style={{ color: "var(--gold)", marginLeft: 8 }}>Справа — Fitbase</b> (факт из клуба):
+              продажи и выручка по дате платежа (касса дня) и посещения (визиты клиентов).
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="split-table">
+                <thead>
                   <tr>
-                    <td colSpan={9} className="muted">Нет данных. Запустите синхронизацию.</td>
+                    <th rowSpan={2}>Дата</th>
+                    <th colSpan={4} className="grp grp-mkt">Маркетинг / Лиды</th>
+                    <th colSpan={3} className="grp grp-fb">Fitbase</th>
                   </tr>
-                )}
-              </tbody>
-              {data.byDate.length > 0 && (() => {
-                const t = sumMetrics(data.byDate);
-                return (
-                  <tfoot>
-                    <tr className="total-row">
-                      <td>Всего</td>
-                      <td>{rub(t.cost)}</td>
-                      <td>{num(t.leads)}</td>
-                      <td>{t.cpl != null ? rub(t.cpl) : "—"}</td>
-                      <td>{num(t.clients)}</td>
-                      <td>{num(t.sales_count)}</td>
-                      <td>{t.cac != null ? rub(t.cac) : "—"}</td>
-                      <td>{rub(t.revenue)}</td>
-                      <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
+                  <tr>
+                    <th className="col-mkt">Расход</th>
+                    <th className="col-mkt">Лиды</th>
+                    <th className="col-mkt">CPL</th>
+                    <th className="col-mkt">Клиенты</th>
+                    <th className="col-fb">Продажи</th>
+                    <th className="col-fb">Выручка</th>
+                    <th className="col-fb">Посещения</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byDate.map((d) => (
+                    <tr key={d.date}>
+                      <td>{new Date(d.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", weekday: "short" })}</td>
+                      <td className="col-mkt">{rub(d.cost)}</td>
+                      <td className="col-mkt">{num(d.leads)}</td>
+                      <td className="col-mkt">{d.cpl != null ? rub(d.cpl) : "—"}</td>
+                      <td className="col-mkt">{num(d.clients)}</td>
+                      <td className="col-fb">{num(d.sales_count)}</td>
+                      <td className="col-fb">{rub(d.revenue)}</td>
+                      <td className="col-fb">{num(d.visits)}</td>
                     </tr>
-                  </tfoot>
-                );
-              })()}
-            </table>
+                  ))}
+                  {data.byDate.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="muted">Нет данных. Запустите синхронизацию.</td>
+                    </tr>
+                  )}
+                </tbody>
+                {data.byDate.length > 0 && (() => {
+                  const t = sumMetrics(data.byDate);
+                  return (
+                    <tfoot>
+                      <tr className="total-row">
+                        <td>Всего</td>
+                        <td className="col-mkt">{rub(t.cost)}</td>
+                        <td className="col-mkt">{num(t.leads)}</td>
+                        <td className="col-mkt">{t.cpl != null ? rub(t.cpl) : "—"}</td>
+                        <td className="col-mkt">{num(t.clients)}</td>
+                        <td className="col-fb">{num(t.sales_count)}</td>
+                        <td className="col-fb">{rub(t.revenue)}</td>
+                        <td className="col-fb">{num(t.visits)}</td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
+              </table>
+            </div>
           </div>
 
           <div className="section-title">Статус синхронизации</div>
@@ -476,6 +484,7 @@ function sumMetrics(rows: readonly unknown[]) {
   const sales_count = sum("sales_count");
   const revenue = sum("revenue");
   const cohortLtv = sum("cohortLtv");
+  const visits = sum("visits");
   return {
     cost,
     leads,
@@ -484,6 +493,7 @@ function sumMetrics(rows: readonly unknown[]) {
     sales_count,
     revenue,
     cohortLtv,
+    visits,
     cpl: leads > 0 ? cost / leads : null,
     cac: cost > 0 && clients > 0 ? cost / clients : null,
     romi: cost > 0 ? (revenue - cost) / cost : null,
