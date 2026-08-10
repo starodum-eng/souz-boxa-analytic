@@ -5,22 +5,22 @@ import type { WebSessionRow, DateRange } from "./types";
  * Docs: https://yandex.ru/dev/metrika/doc/api2/api_v1/intro.html
  *
  * Забираем визиты/пользователей/отказы/достижения целей в разрезе UTM по дням.
- * Это связующее звено воронки: реклама → визит → цель (лид).
+ * Поддержка нескольких счётчиков: YANDEX_METRIKA_COUNTER_ID можно задать через
+ * запятую (напр. старый,новый на время перехода). Цели — YANDEX_METRIKA_GOAL_ID,
+ * тоже через запятую, позиционно к счётчикам (у каждого счётчика своя цель).
+ *
+ * На пересекающихся днях данные счётчиков одного сайта объединяются по МАКСИМУМУ,
+ * чтобы не задваивать визиты, пока на сайте стоят оба тега.
  */
 
 const API_URL = "https://api-metrika.yandex.net/stat/v1/data";
 
-export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRow[]> {
-  // Общий токен Яндекса подходит и для Метрики (см. YANDEX_TOKEN).
-  const token = process.env.YANDEX_METRIKA_TOKEN || process.env.YANDEX_TOKEN;
-  const counterId = process.env.YANDEX_METRIKA_COUNTER_ID;
-  // ID цели в Метрике, которую считаем «лидом» (напр. отправка формы заявки).
-  // У Метрики нет общей метрики достижений — только по конкретной цели:
-  // ym:s:goal<ID>reaches. Если не задан — грузим визиты, лиды = 0.
-  const goalId = process.env.YANDEX_METRIKA_GOAL_ID?.trim();
-  if (!token) throw new Error("YANDEX_METRIKA_TOKEN / YANDEX_TOKEN is not set");
-  if (!counterId) throw new Error("YANDEX_METRIKA_COUNTER_ID is not set");
-
+async function fetchOneCounter(
+  token: string,
+  counterId: string,
+  goalId: string | undefined,
+  range: DateRange,
+): Promise<WebSessionRow[]> {
   const metrics = ["ym:s:visits", "ym:s:users", "ym:s:bounceRate"];
   if (goalId) metrics.push(`ym:s:goal${goalId}reaches`);
 
@@ -28,8 +28,6 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
     ids: counterId,
     date1: range.from,
     date2: range.to,
-    // lastTrafficSource — тип источника (organic/direct/ad/referral/social/…),
-    // нужен для разделения SEO и прямых заходов (UTM у них нет).
     dimensions: "ym:s:date,ym:s:UTMSource,ym:s:UTMMedium,ym:s:UTMCampaign,ym:s:lastTrafficSource",
     metrics: metrics.join(","),
     limit: "100000",
@@ -39,10 +37,9 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
   const res = await fetch(`${API_URL}?${params.toString()}`, {
     headers: { Authorization: `OAuth ${token}` },
   });
-
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Yandex.Metrika API error ${res.status}: ${text}`);
+    throw new Error(`Yandex.Metrika counter ${counterId} error ${res.status}: ${text.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as {
@@ -52,7 +49,6 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
   return json.data.map((row) => {
     const [dateDim, sourceDim, mediumDim, campaignDim, trafficDim] = row.dimensions;
     const [visits, users, bounceRate] = row.metrics;
-    // goalReaches идёт 4-м элементом только если задан goalId; иначе его нет.
     const goalReaches = goalId ? row.metrics[3] : 0;
     const visitsN = Number(visits) || 0;
     return {
@@ -60,14 +56,52 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
       utmSource: sourceDim.name || "",
       utmMedium: mediumDim.name || "",
       utmCampaign: campaignDim.name || "",
-      // у типа трафика код лежит в id (organic/direct/…), name — локализованная подпись
       trafficSource: trafficDim?.id || trafficDim?.name || "",
       visits: visitsN,
       users: Number(users) || 0,
-      // bounceRate — процент; переводим в абсолютное число отказов
       bounces: Math.round(((Number(bounceRate) || 0) / 100) * visitsN),
       goalReaches: Number(goalReaches) || 0,
       raw: row,
     };
   });
+}
+
+export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRow[]> {
+  const token = process.env.YANDEX_METRIKA_TOKEN || process.env.YANDEX_TOKEN;
+  if (!token) throw new Error("YANDEX_METRIKA_TOKEN / YANDEX_TOKEN is not set");
+
+  const counters = (process.env.YANDEX_METRIKA_COUNTER_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (counters.length === 0) throw new Error("YANDEX_METRIKA_COUNTER_ID is not set");
+
+  const goals = (process.env.YANDEX_METRIKA_GOAL_ID || "")
+    .split(",")
+    .map((s) => s.trim());
+
+  // Тянем каждый счётчик со своей целью (позиционно).
+  const perCounter = await Promise.all(
+    counters.map((c, i) => fetchOneCounter(token, c, goals[i] || undefined, range)),
+  );
+
+  // Объединяем по ключу (день+utm+тип трафика), беря МАКСИМУМ метрик —
+  // так визиты одного сайта не задваиваются между счётчиками.
+  const key = (r: WebSessionRow) => `${r.date}|${r.utmSource}|${r.utmMedium}|${r.utmCampaign}|${r.trafficSource}`;
+  const merged = new Map<string, WebSessionRow>();
+  for (const rows of perCounter) {
+    for (const r of rows) {
+      const k = key(r);
+      const prev = merged.get(k);
+      if (!prev) {
+        merged.set(k, { ...r });
+      } else {
+        prev.visits = Math.max(prev.visits, r.visits);
+        prev.users = Math.max(prev.users, r.users);
+        prev.bounces = Math.max(prev.bounces, r.bounces);
+        prev.goalReaches = Math.max(prev.goalReaches, r.goalReaches);
+      }
+    }
+  }
+  return [...merged.values()];
 }
