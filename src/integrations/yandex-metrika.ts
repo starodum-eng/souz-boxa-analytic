@@ -85,6 +85,40 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
     counters.map((c, i) => fetchOneCounter(token, c, goals[i] || undefined, range)),
   );
 
+  // Счётчик Яндекс.Бизнеса (карточка организации) — отдельный источник.
+  // Всю его посещаемость помечаем traffic_source='yandex_business', цель
+  // «Клик на позвонить» = лиды. Витрина сведёт это в канал «Яндекс.Бизнес».
+  const bizCounter = process.env.YANDEX_METRIKA_BUSINESS_COUNTER_ID?.trim();
+  const bizGoal = process.env.YANDEX_METRIKA_BUSINESS_GOAL_ID?.trim();
+  if (bizCounter) {
+    const bizRows = await fetchOneCounter(token, bizCounter, bizGoal || undefined, range);
+    // агрегируем по дню (utm у карточки нет) и метим как yandex_business
+    const byDate = new Map<string, WebSessionRow>();
+    for (const r of bizRows) {
+      const prev = byDate.get(r.date);
+      if (!prev) {
+        byDate.set(r.date, {
+          date: r.date,
+          utmSource: "",
+          utmMedium: "",
+          utmCampaign: "",
+          trafficSource: "yandex_business",
+          visits: r.visits,
+          users: r.users,
+          bounces: r.bounces,
+          goalReaches: r.goalReaches,
+          raw: { business: true },
+        });
+      } else {
+        prev.visits += r.visits;
+        prev.users += r.users;
+        prev.bounces += r.bounces;
+        prev.goalReaches += r.goalReaches;
+      }
+    }
+    perCounter.push([...byDate.values()]);
+  }
+
   // Объединяем по ключу (день+utm+тип трафика), беря МАКСИМУМ метрик —
   // так визиты одного сайта не задваиваются между счётчиками.
   const key = (r: WebSessionRow) => `${r.date}|${r.utmSource}|${r.utmMedium}|${r.utmCampaign}|${r.trafficSource}`;
