@@ -1,0 +1,1 @@
+ALTER TABLE "client_contracts" ADD COLUMN "payment_date" timestamp with time zone;

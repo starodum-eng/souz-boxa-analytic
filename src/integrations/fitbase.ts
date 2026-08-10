@@ -143,6 +143,7 @@ export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseC
     // сумма фактической оплаты; если её нет — цена
     amount: Number(c.amount_of_payment ?? c.price ?? 0) || 0,
     paid: Boolean(c.payment),
+    paymentDate: toDate(c.payment_date),
     beginDate: toDate(c.begin_date),
     endDate: toDate(c.end_date),
     createdAt: toDate(c.created_at),

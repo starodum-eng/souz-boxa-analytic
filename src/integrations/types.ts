@@ -77,6 +77,7 @@ export interface FitbaseContractRow {
   clientId: string | null;
   amount: number; // сумма оплаты
   paid: boolean;
+  paymentDate: Date | null; // дата платежа — для «кассы за период»
   beginDate: Date | null;
   endDate: Date | null;
   createdAt: Date | null;

@@ -168,6 +168,7 @@ export const clientContracts = pgTable(
     clientId: varchar("client_id", { length: 128 }),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
     paid: integer("paid").notNull().default(0),
+    paymentDate: timestamp("payment_date", { withTimezone: true }),
     beginDate: timestamp("begin_date", { withTimezone: true }),
     endDate: timestamp("end_date", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }),

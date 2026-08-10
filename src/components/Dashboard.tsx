@@ -26,7 +26,8 @@ interface Totals {
   visits: number;
   leads: number;
   sales_count: number;
-  revenue: number;
+  revenue: number; // касса за период
+  cohort_ltv: number; // LTV привлечённой когорты
   new_clients: number;
 }
 interface SourceRow {
@@ -35,7 +36,8 @@ interface SourceRow {
   leads: number;
   clients: number;
   paying: number;
-  revenue: number;
+  revenue: number; // касса за период
+  cohortLtv: number; // LTV привлечённой когорты
   cpl: number | null;
   cac: number | null;
   romi: number | null;
@@ -234,10 +236,10 @@ export default function Dashboard() {
         <>
           <div className="kpis">
             <Kpi label="Расход" value={rub(t.cost)} />
-            <Kpi label="Клики" value={num(t.clicks)} />
             <Kpi label="Лиды" value={num(t.leads)} />
             <Kpi label="Клиенты" value={num(t.new_clients)} />
-            <Kpi label="Выручка" value={rub(t.revenue)} />
+            <Kpi label="Касса за период" value={rub(t.revenue)} />
+            <Kpi label="LTV когорты" value={rub(t.cohort_ltv)} />
             <Kpi label="ROMI" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
           </div>
 
@@ -278,7 +280,8 @@ export default function Dashboard() {
                   <th>Клиенты</th>
                   <th>Оплатили</th>
                   <th>CAC</th>
-                  <th>Выручка</th>
+                  <th>Касса</th>
+                  <th>LTV когорты</th>
                   <th>ROMI</th>
                 </tr>
               </thead>
@@ -293,6 +296,7 @@ export default function Dashboard() {
                     <td>{num(s.paying)}</td>
                     <td>{s.cac != null ? rub(s.cac) : "—"}</td>
                     <td>{rub(s.revenue)}</td>
+                    <td className="muted">{rub(s.cohortLtv)}</td>
                     <td className={s.romi != null ? (Number(s.romi) >= 0 ? "pos" : "neg") : "muted"}>
                       {pct(s.romi)}
                     </td>
@@ -300,7 +304,7 @@ export default function Dashboard() {
                 ))}
                 {data.bySource.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                    <td colSpan={10} className="muted">Нет данных за период. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
@@ -317,6 +321,7 @@ export default function Dashboard() {
                       <td>{num(t.paying)}</td>
                       <td>{t.cac != null ? rub(t.cac) : "—"}</td>
                       <td>{rub(t.revenue)}</td>
+                      <td className="muted">{rub(sumMetrics(data.bySource).cohortLtv)}</td>
                       <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
                     </tr>
                   </tfoot>
@@ -470,6 +475,7 @@ function sumMetrics(rows: readonly unknown[]) {
   const paying = sum("paying");
   const sales_count = sum("sales_count");
   const revenue = sum("revenue");
+  const cohortLtv = sum("cohortLtv");
   return {
     cost,
     leads,
@@ -477,6 +483,7 @@ function sumMetrics(rows: readonly unknown[]) {
     paying,
     sales_count,
     revenue,
+    cohortLtv,
     cpl: leads > 0 ? cost / leads : null,
     cac: cost > 0 && clients > 0 ? cost / clients : null,
     romi: cost > 0 ? (revenue - cost) / cost : null,

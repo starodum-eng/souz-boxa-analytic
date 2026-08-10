@@ -101,17 +101,39 @@ export async function GET(req: Request) {
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
       FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+    ),
+    -- касса за период: оплаты по дате платежа в окне
+    cash AS (
+      SELECT client_id, SUM(amount) AS cash
+      FROM client_contracts
+      WHERE client_id IS NOT NULL AND paid = 1 AND payment_date IS NOT NULL
+        AND (payment_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (payment_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY client_id
+    ),
+    -- канал привлечения каждого клиента (или «Не определён», если следа нет)
+    client_channel AS (
+      SELECT c.fitbase_id AS client_id, ft.ts, COALESCE(ft.source, 'Не определён') AS source
+      FROM clients c
+      LEFT JOIN first_touch ft ON ft.client_id = c.fitbase_id
     )
     SELECT
-      ft.source,
-      COUNT(*)::int AS clients,
-      COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0)::int AS paying,
-      COALESCE(SUM(l.ltv), 0) AS revenue
-    FROM first_touch ft
-    LEFT JOIN ltv l ON l.client_id = ft.client_id
-    WHERE (ft.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-      AND (ft.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}
-    GROUP BY ft.source
+      cc.source,
+      -- привлечено за период (когорта по первому касанию)
+      COUNT(*) FILTER (WHERE (cc.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+                         AND (cc.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to})::int AS clients,
+      COUNT(*) FILTER (WHERE (cc.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+                         AND (cc.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+                         AND COALESCE(l.ltv,0) > 0)::int AS paying,
+      -- LTV привлечённой за период когорты
+      COALESCE(SUM(l.ltv) FILTER (WHERE (cc.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+                              AND (cc.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}), 0) AS cohort_ltv,
+      -- касса за период (все оплаты канала в окне, независимо от даты привлечения)
+      COALESCE(SUM(ca.cash), 0) AS cash
+    FROM client_channel cc
+    LEFT JOIN ltv l ON l.client_id = cc.client_id
+    LEFT JOIN cash ca ON ca.client_id = cc.client_id
+    GROUP BY cc.source
   `);
 
   // Влияние каналов: клиенты, которые КАСАЛИСЬ канала за период (не обязательно
@@ -234,10 +256,15 @@ export async function GET(req: Request) {
 
   // Единая разбивка по источникам: реклама (расход/лиды) + клиенты/выручка (LTV)
   // на одном ключе-канале → настоящий ROMI по каналу, где есть и расход, и деньги.
-  const crMap = new Map<string, { clients: number; paying: number; revenue: number }>(
+  const crMap = new Map<string, { clients: number; paying: number; cohortLtv: number; cash: number }>(
     clientRevBySource.rows.map((r: Record<string, unknown>) => [
       String(r.source),
-      { clients: Number(r.clients), paying: Number(r.paying), revenue: Number(r.revenue) },
+      {
+        clients: Number(r.clients),
+        paying: Number(r.paying),
+        cohortLtv: Number(r.cohort_ltv),
+        cash: Number(r.cash),
+      },
     ]),
   );
   const adMap = new Map<string, Record<string, unknown>>(
@@ -247,10 +274,11 @@ export async function GET(req: Request) {
 
   const bySourceMerged = [...allSources].map((source) => {
     const ad = adMap.get(source);
-    const cr = crMap.get(source) ?? { clients: 0, paying: 0, revenue: 0 };
+    const cr = crMap.get(source) ?? { clients: 0, paying: 0, cohortLtv: 0, cash: 0 };
     const cost = Number(ad?.cost ?? 0);
     const leads = Number(ad?.leads ?? 0);
-    const revenue = cr.revenue;
+    // Основная выручка канала — касса за период (сходится с Fitbase). ROMI от неё.
+    const revenue = cr.cash;
     return {
       source,
       cost,
@@ -258,7 +286,8 @@ export async function GET(req: Request) {
       leads,
       clients: cr.clients,
       paying: cr.paying,
-      revenue,
+      revenue, // касса за период
+      cohortLtv: cr.cohortLtv, // LTV привлечённой за период когорты
       cpl: leads > 0 ? Math.round((cost / leads) * 100) / 100 : null,
       cac: cost > 0 && cr.clients > 0 ? Math.round((cost / cr.clients) * 100) / 100 : null,
       romi: cost > 0 ? Math.round(((revenue - cost) / cost) * 10000) / 10000 : null,
@@ -266,15 +295,15 @@ export async function GET(req: Request) {
   });
   bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
 
-  // Общая выручка = сумма LTV по каналам (когорта первого обращения).
-  const revenueTotal = bySourceMerged.reduce((a, r) => a + Number(r.revenue || 0), 0);
+  const cashTotal = bySourceMerged.reduce((a, r) => a + Number(r.revenue || 0), 0);
+  const cohortLtvTotal = bySourceMerged.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
 
   return NextResponse.json({
     totals: {
       ...(totals.rows[0] ?? {}),
       new_clients: clientsAgg.rows[0]?.new_clients ?? 0,
-      // выручка = LTV клиентов, привлечённых за период (когорта)
-      revenue: revenueTotal,
+      revenue: cashTotal, // касса за период (сходится с Fitbase)
+      cohort_ltv: cohortLtvTotal, // LTV привлечённой когорты
     },
     bySource: bySourceMerged,
     channelInfluence: channelInfluence.rows,

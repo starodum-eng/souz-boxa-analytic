@@ -182,6 +182,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
             clientId: sql`excluded.client_id`,
             amount: sql`excluded.amount`,
             paid: sql`excluded.paid`,
+            paymentDate: sql`excluded.payment_date`,
             beginDate: sql`excluded.begin_date`,
             endDate: sql`excluded.end_date`,
             createdAt: sql`excluded.created_at`,
