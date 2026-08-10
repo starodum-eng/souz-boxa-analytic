@@ -92,17 +92,21 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
   const bizGoal = process.env.YANDEX_METRIKA_BUSINESS_GOAL_ID?.trim();
   if (bizCounter) {
     const bizRows = await fetchOneCounter(token, bizCounter, bizGoal || undefined, range);
-    // агрегируем по дню (utm у карточки нет) и метим как yandex_business
-    const byDate = new Map<string, WebSessionRow>();
+    // Делим по типу трафика: платная реклама карточки vs остальное (карты/поиск/прямые).
+    // Метим отдельными traffic_source, чтобы витрина развела на два канала.
+    const agg = new Map<string, WebSessionRow>();
     for (const r of bizRows) {
-      const prev = byDate.get(r.date);
+      const isAd = r.trafficSource.toLowerCase() === "ad";
+      const tag = isAd ? "yandex_business_ad" : "yandex_business";
+      const k = `${r.date}|${tag}`;
+      const prev = agg.get(k);
       if (!prev) {
-        byDate.set(r.date, {
+        agg.set(k, {
           date: r.date,
           utmSource: "",
           utmMedium: "",
           utmCampaign: "",
-          trafficSource: "yandex_business",
+          trafficSource: tag,
           visits: r.visits,
           users: r.users,
           bounces: r.bounces,
@@ -116,7 +120,7 @@ export async function fetchYandexMetrika(range: DateRange): Promise<WebSessionRo
         prev.goalReaches += r.goalReaches;
       }
     }
-    perCounter.push([...byDate.values()]);
+    perCounter.push([...agg.values()]);
   }
 
   // Объединяем по ключу (день+utm+тип трафика), беря МАКСИМУМ метрик —
