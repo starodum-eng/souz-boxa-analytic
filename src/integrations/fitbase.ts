@@ -104,17 +104,30 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
   };
 
   const first = await getPage(1);
-  const out = extractItems(first);
-  const total = Number(first.total_count) || out.length;
-  const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES);
+  const firstItems = extractItems(first);
+  const out = [...firstItems];
 
-  // Остальные страницы — небольшими параллельными пачками, чтобы не ловить 429.
+  // ВАЖНО: total_count Fitbase отдаёт с запаздыванием — он не учитывает самые
+  // свежие записи. Поэтому НЕ используем его как условие остановки (иначе
+  // теряется последняя страница с новейшими платежами/продлениями).
+  // Останавливаемся, только когда страница пришла НЕПОЛНОЙ — значит данные кончились.
+  if (firstItems.length < PAGE_SIZE) return out;
+
+  // Страницы грузим небольшими параллельными пачками (чтобы не ловить 429),
+  // продолжая, пока не встретим неполную страницу.
   const CONCURRENCY = 3;
-  for (let start = 2; start <= pages; start += CONCURRENCY) {
+  let page = 2;
+  let done = false;
+  while (!done && page <= MAX_PAGES) {
     const batch = [];
-    for (let p = start; p < start + CONCURRENCY && p <= pages; p++) batch.push(getPage(p));
+    for (let p = page; p < page + CONCURRENCY && p <= MAX_PAGES; p++) batch.push(getPage(p));
     const results = await Promise.all(batch);
-    for (const json of results) out.push(...extractItems(json));
+    for (const json of results) {
+      const items = extractItems(json);
+      out.push(...items);
+      if (items.length < PAGE_SIZE) done = true; // дошли до конца выгрузки
+    }
+    page += batch.length;
   }
   return out;
 }
