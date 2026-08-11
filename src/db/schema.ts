@@ -182,6 +182,30 @@ export const clientContracts = pgTable(
 );
 
 /**
+ * Единая касса Fitbase: абонементы + услуги + товары.
+ * Источник правды для выручки/LTV (у клуба деньги не только в абонементах).
+ */
+export const clientPayments = pgTable(
+  "client_payments",
+  {
+    id: serial("id").primaryKey(),
+    extId: varchar("ext_id", { length: 160 }).notNull(), // kind:id
+    kind: varchar("kind", { length: 32 }).notNull(), // contract | service | product
+    clientId: varchar("client_id", { length: 128 }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    paid: integer("paid").notNull().default(0),
+    payDate: timestamp("pay_date", { withTimezone: true }),
+    raw: jsonb("raw"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("client_payments_uniq").on(t.extId),
+    index("client_payments_client_idx").on(t.clientId),
+    index("client_payments_paydate_idx").on(t.payDate),
+  ],
+);
+
+/**
  * Визиты клиентов Fitbase (/v2/client/visits) — посещаемость по дням.
  */
 export const clientVisits = pgTable(

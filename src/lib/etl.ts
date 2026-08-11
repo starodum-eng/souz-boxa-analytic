@@ -4,11 +4,17 @@ import { lastNDays, type SourceKey } from "@/integrations/types";
 import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
 import { fetchYandexMetrika } from "@/integrations/yandex-metrika";
 import { fetchVkAdsSpend } from "@/integrations/vk-ads";
-import { fetchFitbaseClients, fetchFitbaseLeads, fetchFitbaseContracts, fetchFitbaseVisits } from "@/integrations/fitbase";
+import {
+  fetchFitbaseClients,
+  fetchFitbaseLeads,
+  fetchFitbaseContracts,
+  fetchFitbaseVisits,
+  fetchFitbasePayments,
+} from "@/integrations/fitbase";
 import { fetchCallibri } from "@/integrations/callibri";
 import { normalizePhone } from "@/lib/phone";
 
-const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, clientVisits, leadTouches, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, clientPayments, clientVisits, leadTouches, dailyMetrics, syncLog } = schema;
 
 export interface SyncResult {
   source: SourceKey;
@@ -208,7 +214,36 @@ export async function runFullSync(): Promise<SyncResult[]> {
         });
     }
 
-    return clientRows.length + leadRows.length + contractRows.length + visitRows.length;
+    // Единая касса: абонементы + услуги + товары.
+    const payMap = new Map<string, (Awaited<ReturnType<typeof fetchFitbasePayments>>)[number]>();
+    for (const p of await fetchFitbasePayments(range)) if (p.extId) payMap.set(p.extId, p);
+    const payRows = [...payMap.values()];
+    for (let i = 0; i < payRows.length; i += CHUNK) {
+      const batch = payRows.slice(i, i + CHUNK).map((p) => ({
+        extId: p.extId,
+        kind: p.kind,
+        clientId: p.clientId,
+        amount: String(p.amount),
+        paid: p.paid ? 1 : 0,
+        payDate: p.payDate,
+        raw: p.raw,
+      }));
+      await db
+        .insert(clientPayments)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [clientPayments.extId],
+          set: {
+            clientId: sql`excluded.client_id`,
+            amount: sql`excluded.amount`,
+            paid: sql`excluded.paid`,
+            payDate: sql`excluded.pay_date`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    return clientRows.length + leadRows.length + contractRows.length + visitRows.length + payRows.length;
   }));
 
   results.push(await guarded("callibri", async () => {

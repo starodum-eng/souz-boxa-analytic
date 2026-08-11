@@ -100,15 +100,15 @@ export async function GET(req: Request) {
     ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
-      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+      FROM client_payments WHERE client_id IS NOT NULL AND paid = 1 GROUP BY client_id
     ),
-    -- касса за период: оплаты по дате платежа в окне
+    -- касса за период: все оплаты (абонементы+услуги+товары) по дате платежа
     cash AS (
       SELECT client_id, SUM(amount) AS cash
-      FROM client_contracts
-      WHERE client_id IS NOT NULL AND paid = 1 AND payment_date IS NOT NULL
-        AND (payment_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-        AND (payment_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      FROM client_payments
+      WHERE client_id IS NOT NULL AND paid = 1 AND pay_date IS NOT NULL
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
       GROUP BY client_id
     ),
     -- канал привлечения каждого клиента (или «Не определён», если следа нет)
@@ -177,7 +177,7 @@ export async function GET(req: Request) {
     ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
-      FROM client_contracts WHERE client_id IS NOT NULL GROUP BY client_id
+      FROM client_payments WHERE client_id IS NOT NULL AND paid = 1 GROUP BY client_id
     )
     SELECT
       ip.source,
@@ -202,10 +202,10 @@ export async function GET(req: Request) {
       FROM clients WHERE created_at IS NOT NULL GROUP BY 1
     ),
     sales AS (
-      SELECT (payment_date AT TIME ZONE 'Europe/Moscow')::date AS date,
+      SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date,
         COUNT(*) AS sales_count, SUM(amount) AS revenue
-      FROM client_contracts
-      WHERE paid = 1 AND payment_date IS NOT NULL GROUP BY 1
+      FROM client_payments
+      WHERE paid = 1 AND pay_date IS NOT NULL GROUP BY 1
     ),
     vis AS (
       SELECT (start_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS visits

@@ -84,6 +84,17 @@ export interface FitbaseContractRow {
   raw?: unknown;
 }
 
+/** Платёж клиента Fitbase (абонемент/услуга/товар) — единая касса. */
+export interface FitbasePaymentRow {
+  extId: string; // kind:id — уникален across типов
+  kind: string; // contract | service | product
+  clientId: string | null;
+  amount: number;
+  paid: boolean;
+  payDate: Date | null;
+  raw?: unknown;
+}
+
 /** Визит клиента Fitbase (/v2/client/visits) — посещаемость. */
 export interface FitbaseVisitRow {
   fitbaseId: string;

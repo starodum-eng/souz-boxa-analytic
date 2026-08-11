@@ -1,4 +1,11 @@
-import type { ClientRow, DateRange, FitbaseLeadRow, FitbaseContractRow, FitbaseVisitRow } from "./types";
+import type {
+  ClientRow,
+  DateRange,
+  FitbaseLeadRow,
+  FitbaseContractRow,
+  FitbaseVisitRow,
+  FitbasePaymentRow,
+} from "./types";
 import { normalizePhone } from "@/lib/phone";
 
 /**
@@ -161,4 +168,56 @@ export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseC
     createdAt: toDate(c.created_at),
     raw: c,
   }));
+}
+
+/** Единая касса: абонементы + услуги + товары → нормализованные платежи. */
+export async function fetchFitbasePayments(range: DateRange): Promise<FitbasePaymentRow[]> {
+  const [contracts, services, products] = await Promise.all([
+    fetchFitbaseContracts(range),
+    fetchAllPages("/client-service", "/client-service"),
+    fetchAllPages("/client-product", "/client-product"),
+  ]);
+
+  const out: FitbasePaymentRow[] = [];
+
+  // Абонементы
+  for (const c of contracts) {
+    out.push({
+      extId: `contract:${c.fitbaseId}`,
+      kind: "contract",
+      clientId: c.clientId,
+      amount: c.amount,
+      paid: c.paid,
+      payDate: c.paymentDate,
+      raw: c.raw,
+    });
+  }
+  // Услуги (персональные тренировки и т.п.)
+  for (const s of services) {
+    const amount = Number(s.pay_amount ?? s.amount ?? 0) || 0;
+    out.push({
+      extId: `service:${s.id}`,
+      kind: "service",
+      clientId: s.client_id != null ? String(s.client_id) : null,
+      amount,
+      paid: amount > 0,
+      payDate: toDate(s.pay_date),
+      raw: s,
+    });
+  }
+  // Товары
+  for (const p of products) {
+    const amount = Number(p.pay_amount ?? p.amount ?? 0) || 0;
+    out.push({
+      extId: `product:${p.id}`,
+      kind: "product",
+      clientId: p.client_id != null ? String(p.client_id) : null,
+      amount,
+      paid: amount > 0,
+      payDate: toDate(p.pay_date),
+      raw: p,
+    });
+  }
+
+  return out;
 }
