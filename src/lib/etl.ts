@@ -30,45 +30,19 @@ export async function runFullSync(): Promise<SyncResult[]> {
   const range = lastNDays(SYNC_WINDOW_DAYS);
   const results: SyncResult[] = [];
 
-  results.push(await guarded("yandex_direct", async () => {
-    const rows = await fetchYandexDirectSpend(range);
-    for (const r of rows) {
-      await db
-        .insert(adSpend)
-        .values({
-          date: r.date,
-          source: "yandex_direct",
-          campaignId: r.campaignId,
-          campaignName: r.campaignName,
-          utmCampaign: r.utmCampaign,
-          cost: String(r.cost),
-          impressions: r.impressions,
-          clicks: r.clicks,
-          raw: r.raw,
-        })
-        .onConflictDoUpdate({
-          target: [adSpend.date, adSpend.source, adSpend.campaignId],
-          set: {
-            cost: String(r.cost),
-            impressions: r.impressions,
-            clicks: r.clicks,
-            campaignName: r.campaignName,
-            utmCampaign: r.utmCampaign,
-            updatedAt: new Date(),
-          },
-        });
-    }
-    return rows.length;
-  }));
+  const CHUNK = 500;
 
-  results.push(await guarded("vk_ads", async () => {
-    const rows = await fetchVkAdsSpend(range);
-    for (const r of rows) {
-      await db
-        .insert(adSpend)
-        .values({
+  const syncAdSpend = (src: "yandex_direct" | "vk_ads", fetcher: typeof fetchYandexDirectSpend) =>
+    guarded(src, async () => {
+      const rows = await fetcher(range);
+      // дедуп по ключу уникального индекса (date, source, campaign_id)
+      const m = new Map<string, (typeof rows)[number]>();
+      for (const r of rows) m.set(`${r.date}|${r.campaignId}`, r);
+      const uniq = [...m.values()];
+      for (let i = 0; i < uniq.length; i += CHUNK) {
+        const batch = uniq.slice(i, i + CHUNK).map((r) => ({
           date: r.date,
-          source: "vk_ads",
+          source: src,
           campaignId: r.campaignId,
           campaignName: r.campaignName,
           utmCampaign: r.utmCampaign,
@@ -76,44 +50,56 @@ export async function runFullSync(): Promise<SyncResult[]> {
           impressions: r.impressions,
           clicks: r.clicks,
           raw: r.raw,
-        })
-        .onConflictDoUpdate({
-          target: [adSpend.date, adSpend.source, adSpend.campaignId],
-          set: {
-            cost: String(r.cost),
-            impressions: r.impressions,
-            clicks: r.clicks,
-            updatedAt: new Date(),
-          },
-        });
-    }
-    return rows.length;
-  }));
+        }));
+        await db
+          .insert(adSpend)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [adSpend.date, adSpend.source, adSpend.campaignId],
+            set: {
+              cost: sql`excluded.cost`,
+              impressions: sql`excluded.impressions`,
+              clicks: sql`excluded.clicks`,
+              campaignName: sql`excluded.campaign_name`,
+              utmCampaign: sql`excluded.utm_campaign`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      return rows.length;
+    });
+
+  results.push(await syncAdSpend("yandex_direct", fetchYandexDirectSpend));
+  results.push(await syncAdSpend("vk_ads", fetchVkAdsSpend));
 
   results.push(await guarded("yandex_metrika", async () => {
     const rows = await fetchYandexMetrika(range);
-    for (const r of rows) {
+    const m = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) m.set(`${r.date}|${r.utmSource}|${r.utmMedium}|${r.utmCampaign}|${r.trafficSource}`, r);
+    const uniq = [...m.values()];
+    for (let i = 0; i < uniq.length; i += CHUNK) {
+      const batch = uniq.slice(i, i + CHUNK).map((r) => ({
+        date: r.date,
+        utmSource: r.utmSource,
+        utmMedium: r.utmMedium,
+        utmCampaign: r.utmCampaign,
+        trafficSource: r.trafficSource,
+        visits: r.visits,
+        users: r.users,
+        bounces: r.bounces,
+        goalReaches: r.goalReaches,
+        raw: r.raw,
+      }));
       await db
         .insert(webSessions)
-        .values({
-          date: r.date,
-          utmSource: r.utmSource,
-          utmMedium: r.utmMedium,
-          utmCampaign: r.utmCampaign,
-          trafficSource: r.trafficSource,
-          visits: r.visits,
-          users: r.users,
-          bounces: r.bounces,
-          goalReaches: r.goalReaches,
-          raw: r.raw,
-        })
+        .values(batch)
         .onConflictDoUpdate({
           target: [webSessions.date, webSessions.utmSource, webSessions.utmMedium, webSessions.utmCampaign, webSessions.trafficSource],
           set: {
-            visits: r.visits,
-            users: r.users,
-            bounces: r.bounces,
-            goalReaches: r.goalReaches,
+            visits: sql`excluded.visits`,
+            users: sql`excluded.users`,
+            bounces: sql`excluded.bounces`,
+            goalReaches: sql`excluded.goal_reaches`,
             updatedAt: new Date(),
           },
         });
@@ -129,10 +115,18 @@ export async function runFullSync(): Promise<SyncResult[]> {
       for (const r of rows) m.set(r.fitbaseId, r);
       return [...m.values()];
     };
-    const clientRows = dedupe((await fetchFitbaseClients(range)).filter((c) => c.fitbaseId));
-    // Пакетная вставка: neon-http делает по HTTP-запросу на каждый вызов,
-    // поэтому вставляем чанками, а не по одной строке (иначе тысячи round-trip).
-    const CHUNK = 500;
+    // Все выгрузки Fitbase — параллельно (иначе не укладываемся в лимит функции).
+    const [clientsRaw, leadsRaw, contractsRaw, visitsRaw] = await Promise.all([
+      fetchFitbaseClients(range),
+      fetchFitbaseLeads(range),
+      fetchFitbaseContracts(range),
+      fetchFitbaseVisits(range),
+    ]);
+    const contractRowsAll = dedupe(contractsRaw.filter((c) => c.fitbaseId));
+    const paymentsRaw = await fetchFitbasePayments(contractRowsAll);
+
+    const clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
+    // Пакетная вставка чанками (neon-http делает HTTP-запрос на каждый вызов).
     for (let i = 0; i < clientRows.length; i += CHUNK) {
       const batch = clientRows.slice(i, i + CHUNK);
       await db
@@ -150,7 +144,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Лиды воронки (атрибуция канала + этап).
-    const leadRows = dedupe((await fetchFitbaseLeads(range)).filter((l) => l.fitbaseId));
+    const leadRows = dedupe(leadsRaw.filter((l) => l.fitbaseId));
     for (let i = 0; i < leadRows.length; i += CHUNK) {
       const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
       await db
@@ -174,7 +168,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Абонементы (деньги/LTV).
-    const contractRows = dedupe((await fetchFitbaseContracts(range)).filter((c) => c.fitbaseId));
+    const contractRows = contractRowsAll;
     for (let i = 0; i < contractRows.length; i += CHUNK) {
       const batch = contractRows
         .slice(i, i + CHUNK)
@@ -198,7 +192,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Визиты (посещаемость).
-    const visitRows = dedupe((await fetchFitbaseVisits(range)).filter((v) => v.fitbaseId));
+    const visitRows = dedupe(visitsRaw.filter((v) => v.fitbaseId));
     for (let i = 0; i < visitRows.length; i += CHUNK) {
       const batch = visitRows.slice(i, i + CHUNK);
       await db
@@ -215,8 +209,8 @@ export async function runFullSync(): Promise<SyncResult[]> {
     }
 
     // Единая касса: абонементы + услуги + товары.
-    const payMap = new Map<string, (Awaited<ReturnType<typeof fetchFitbasePayments>>)[number]>();
-    for (const p of await fetchFitbasePayments(range)) if (p.extId) payMap.set(p.extId, p);
+    const payMap = new Map<string, (typeof paymentsRaw)[number]>();
+    for (const p of paymentsRaw) if (p.extId) payMap.set(p.extId, p);
     const payRows = [...payMap.values()];
     for (let i = 0; i < payRows.length; i += CHUNK) {
       const batch = payRows.slice(i, i + CHUNK).map((p) => ({

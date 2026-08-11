@@ -81,25 +81,32 @@ function fullName(c: any): string | null {
   return parts.length ? parts.join(" ") : (c.name ?? null);
 }
 
-/** Универсальная постраничная выгрузка всех записей эндпоинта Fitbase. */
+/** Универсальная выгрузка эндпоинта Fitbase с параллельной пагинацией. */
 async function fetchAllPages(path: string, endpointName: string): Promise<any[]> {
   const headers = authHeaders();
-  const out: any[] = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const sep = path.includes("?") ? "&" : "?";
-    const url = `${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`;
-    const res = await fetch(url, { headers });
+  const sep = path.includes("?") ? "&" : "?";
+  const getPage = async (page: number) => {
+    const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Fitbase ${endpointName} error ${res.status}: ${text.slice(0, 300)}`);
     }
-    const json = (await res.json()) as Record<string, unknown>;
-    const items = extractItems(json);
-    if (items.length === 0) break;
-    out.push(...items);
-    const total = Number(json.total_count) || 0;
-    if (total && page * PAGE_SIZE >= total) break;
-    if (items.length < PAGE_SIZE) break;
+    return (await res.json()) as Record<string, unknown>;
+  };
+
+  const first = await getPage(1);
+  const out = extractItems(first);
+  const total = Number(first.total_count) || out.length;
+  const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES);
+  if (pages <= 1) return out;
+
+  // Остальные страницы — параллельно, пачками (ограничиваем конкурентность).
+  const CONCURRENCY = 6;
+  for (let start = 2; start <= pages; start += CONCURRENCY) {
+    const batch = [];
+    for (let p = start; p < start + CONCURRENCY && p <= pages; p++) batch.push(getPage(p));
+    const results = await Promise.all(batch);
+    for (const json of results) out.push(...extractItems(json));
   }
   return out;
 }
@@ -170,10 +177,12 @@ export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseC
   }));
 }
 
-/** Единая касса: абонементы + услуги + товары → нормализованные платежи. */
-export async function fetchFitbasePayments(range: DateRange): Promise<FitbasePaymentRow[]> {
-  const [contracts, services, products] = await Promise.all([
-    fetchFitbaseContracts(range),
+/**
+ * Единая касса: абонементы (уже загруженные) + услуги + товары.
+ * Абонементы передаём готовыми, чтобы не тянуть их дважды.
+ */
+export async function fetchFitbasePayments(contracts: FitbaseContractRow[]): Promise<FitbasePaymentRow[]> {
+  const [services, products] = await Promise.all([
     fetchAllPages("/client-service", "/client-service"),
     fetchAllPages("/client-product", "/client-product"),
   ]);
