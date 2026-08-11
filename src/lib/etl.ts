@@ -115,13 +115,12 @@ export async function runFullSync(): Promise<SyncResult[]> {
       for (const r of rows) m.set(r.fitbaseId, r);
       return [...m.values()];
     };
-    // Все выгрузки Fitbase — параллельно (иначе не укладываемся в лимит функции).
-    const [clientsRaw, leadsRaw, contractsRaw, visitsRaw] = await Promise.all([
-      fetchFitbaseClients(range),
-      fetchFitbaseLeads(range),
-      fetchFitbaseContracts(range),
-      fetchFitbaseVisits(range),
-    ]);
+    // Эндпоинты Fitbase — последовательно (внутри каждого пагинация по 3 стр.
+    // параллельно + повтор при 429), чтобы суммарно не превышать лимит частоты.
+    const clientsRaw = await fetchFitbaseClients(range);
+    const leadsRaw = await fetchFitbaseLeads(range);
+    const contractsRaw = await fetchFitbaseContracts(range);
+    const visitsRaw = await fetchFitbaseVisits(range);
     const contractRowsAll = dedupe(contractsRaw.filter((c) => c.fitbaseId));
     const paymentsRaw = await fetchFitbasePayments(contractRowsAll);
 

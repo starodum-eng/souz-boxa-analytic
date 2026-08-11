@@ -81,27 +81,35 @@ function fullName(c: any): string | null {
   return parts.length ? parts.join(" ") : (c.name ?? null);
 }
 
-/** Универсальная выгрузка эндпоинта Fitbase с параллельной пагинацией. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Универсальная выгрузка эндпоинта Fitbase: умеренная параллельность + повтор при 429. */
 async function fetchAllPages(path: string, endpointName: string): Promise<any[]> {
   const headers = authHeaders();
   const sep = path.includes("?") ? "&" : "?";
-  const getPage = async (page: number) => {
-    const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Fitbase ${endpointName} error ${res.status}: ${text.slice(0, 300)}`);
+  const getPage = async (page: number): Promise<Record<string, unknown>> => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
+      if (res.status === 429) {
+        await sleep(1000 * (attempt + 1)); // лимит частоты — ждём и повторяем
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Fitbase ${endpointName} error ${res.status}: ${text.slice(0, 300)}`);
+      }
+      return (await res.json()) as Record<string, unknown>;
     }
-    return (await res.json()) as Record<string, unknown>;
+    throw new Error(`Fitbase ${endpointName}: превышен лимит запросов (429) после повторов`);
   };
 
   const first = await getPage(1);
   const out = extractItems(first);
   const total = Number(first.total_count) || out.length;
   const pages = Math.min(Math.ceil(total / PAGE_SIZE), MAX_PAGES);
-  if (pages <= 1) return out;
 
-  // Остальные страницы — параллельно, пачками (ограничиваем конкурентность).
-  const CONCURRENCY = 6;
+  // Остальные страницы — небольшими параллельными пачками, чтобы не ловить 429.
+  const CONCURRENCY = 3;
   for (let start = 2; start <= pages; start += CONCURRENCY) {
     const batch = [];
     for (let p = start; p < start + CONCURRENCY && p <= pages; p++) batch.push(getPage(p));
@@ -182,10 +190,8 @@ export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseC
  * Абонементы передаём готовыми, чтобы не тянуть их дважды.
  */
 export async function fetchFitbasePayments(contracts: FitbaseContractRow[]): Promise<FitbasePaymentRow[]> {
-  const [services, products] = await Promise.all([
-    fetchAllPages("/client-service", "/client-service"),
-    fetchAllPages("/client-product", "/client-product"),
-  ]);
+  const services = await fetchAllPages("/client-service", "/client-service");
+  const products = await fetchAllPages("/client-product", "/client-product");
 
   const out: FitbasePaymentRow[] = [];
 
