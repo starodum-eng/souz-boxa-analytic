@@ -29,7 +29,15 @@ interface Totals {
   revenue: number; // касса за период
   cohort_ltv: number; // LTV привлечённой когорты
   romi_cohort: number | null; // когортный ROMI по платным каналам
+  avg_ltv: number | null; // средний LTV клиента за всё время
   new_clients: number;
+}
+interface LifetimeRow {
+  source: string;
+  clients: number;
+  paying: number;
+  ltv: number;
+  avg_ltv: number | null;
 }
 interface SourceRow {
   source: string;
@@ -80,6 +88,7 @@ interface Data {
   totals: Totals;
   bySource: SourceRow[];
   channelInfluence: InfluenceRow[];
+  lifetimeByChannel: LifetimeRow[];
   byDate: DateRow[];
   timeline: TimePoint[];
   lastSync: SyncRow[];
@@ -242,7 +251,7 @@ export default function Dashboard() {
             <Kpi label="Лиды" value={num(t.leads)} />
             <Kpi label="Клиенты" value={num(t.new_clients)} />
             <Kpi label="Касса за период" value={rub(t.revenue)} />
-            <Kpi label="LTV когорты" value={rub(t.cohort_ltv)} />
+            <Kpi label="Средний LTV клиента" value={t.avg_ltv != null ? rub(t.avg_ltv) : "—"} />
             <Kpi
               label="ROMI когорты"
               value={pct(t.romi_cohort ?? null)}
@@ -289,8 +298,7 @@ export default function Dashboard() {
                   <th title="Из привлечённых — сколько сделали хотя бы одну оплату.">Оплатили</th>
                   <th title="Стоимость привлечения клиента = Расход ÷ Клиенты.">CAC</th>
                   <th title="Реальные оплаты за период (из отчёта Fitbase). Сходится с кассой Fitbase.">Касса</th>
-                  <th title="Сколько принесут за всё время клиенты, привлечённые за период (сумма их оплат).">LTV когорты</th>
-                  <th title="Когортный ROMI: (LTV когорты − Расход) ÷ Расход. Честная окупаемость привлечённых за период клиентов.">ROMI когорты</th>
+                  <th title="Когортный ROMI: (LTV привлечённых за период клиентов − Расход) ÷ Расход. Честная окупаемость привлечения.">ROMI когорты</th>
                   <th title="ROMI по кассе: (Касса − Расход) ÷ Расход. Учитывает все оплаты периода, включая продления старых клиентов.">ROMI (касса)</th>
                 </tr>
               </thead>
@@ -305,7 +313,6 @@ export default function Dashboard() {
                     <td>{num(s.paying)}</td>
                     <td>{s.cac != null ? rub(s.cac) : "—"}</td>
                     <td>{rub(s.revenue)}</td>
-                    <td className="muted">{rub(s.cohortLtv)}</td>
                     <td className={s.romiCohort != null ? (Number(s.romiCohort) >= 0 ? "pos" : "neg") : "muted"}>
                       {pct(s.romiCohort)}
                     </td>
@@ -316,7 +323,7 @@ export default function Dashboard() {
                 ))}
                 {data.bySource.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                    <td colSpan={10} className="muted">Нет данных за период. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
@@ -333,7 +340,6 @@ export default function Dashboard() {
                       <td>{num(t.paying)}</td>
                       <td>{t.cac != null ? rub(t.cac) : "—"}</td>
                       <td>{rub(t.revenue)}</td>
-                      <td className="muted">{rub(sumMetrics(data.bySource).cohortLtv)}</td>
                       <td className={data.totals.romi_cohort != null ? (data.totals.romi_cohort >= 0 ? "pos" : "neg") : "muted"}>
                         {pct(data.totals.romi_cohort ?? null)}
                       </td>
@@ -342,6 +348,41 @@ export default function Dashboard() {
                   </tfoot>
                 );
               })()}
+            </table>
+          </div>
+
+          <div className="section-title">Ценность клиентов по каналам · за всё время</div>
+          <div className="card">
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              Сколько денег принесли за <b>всю жизнь</b> клиенты, которых привёл канал (по первому касанию).
+              Не зависит от выбранного периода — показывает, какой канал приводит самых <b>денежных</b> клиентов.
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Канал</th>
+                  <th title="Сколько клиентов канал привёл за всю историю.">Привёл клиентов</th>
+                  <th title="Из них хотя бы раз заплатили.">Оплатили</th>
+                  <th title="Суммарные оплаты этих клиентов за всё время.">LTV за всё время</th>
+                  <th title="LTV за всё время ÷ число оплативших. Средняя ценность клиента канала.">Средний LTV</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.lifetimeByChannel.map((r) => (
+                  <tr key={r.source}>
+                    <td>{SOURCE_LABEL[r.source] ?? r.source}</td>
+                    <td>{num(r.clients)}</td>
+                    <td>{num(r.paying)}</td>
+                    <td>{rub(r.ltv)}</td>
+                    <td>{r.avg_ltv != null ? rub(r.avg_ltv) : "—"}</td>
+                  </tr>
+                ))}
+                {data.lifetimeByChannel.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted">Нет данных.</td>
+                  </tr>
+                )}
+              </tbody>
             </table>
           </div>
 

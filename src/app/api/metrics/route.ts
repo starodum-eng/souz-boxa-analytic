@@ -261,6 +261,65 @@ export async function GET(req: Request) {
       AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
   `);
 
+  // LTV по каналам ПРИВЛЕЧЕНИЯ за ВСЁ время (не зависит от периода): какой канал
+  // приводит самых денежных клиентов. Канал — по первому касанию, LTV — все оплаты.
+  const lifetimeByChannel = await db.execute(sql`
+    WITH touches AS (
+      SELECT c.fitbase_id AS client_id, lt.created_at AS ts,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(lt.utm_source) LIKE '%yandex%' OR lower(lt.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(lt.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE lt.utm_source
+        END AS source
+      FROM lead_touches lt
+      JOIN clients c ON right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 10) = lt.phone_norm
+      LEFT JOIN source_mappings m ON m.utm_source = lower(lt.utm_source)
+      WHERE lt.phone_norm IS NOT NULL AND coalesce(lt.utm_source,'') <> ''
+      UNION ALL
+      SELECT fl.client_id, fl.created_at,
+        CASE
+          WHEN coalesce(m.label,'') <> '' THEN m.label
+          WHEN lower(fl.utm_source) LIKE '%yandex%' OR lower(fl.utm_source) LIKE '%direct%' THEN 'Яндекс.Директ'
+          WHEN lower(fl.utm_source) LIKE '%vk%' THEN 'VK Реклама'
+          ELSE fl.utm_source
+        END
+      FROM fitbase_leads fl LEFT JOIN source_mappings m ON m.utm_source = lower(fl.utm_source)
+      WHERE fl.client_id IS NOT NULL AND coalesce(fl.utm_source,'') <> ''
+      UNION ALL
+      SELECT fl.client_id, fl.created_at,
+        CASE WHEN lower(fl.advertising_source) LIKE '%вконтакте%' THEN 'VK Реклама' ELSE fl.advertising_source END
+      FROM fitbase_leads fl WHERE fl.client_id IS NOT NULL AND coalesce(fl.advertising_source,'') <> ''
+    ),
+    first_touch AS (
+      SELECT DISTINCT ON (client_id) client_id, source
+      FROM touches WHERE coalesce(source,'') <> '' ORDER BY client_id, ts ASC NULLS LAST
+    ),
+    ltv AS (
+      SELECT client_id, SUM(amount) AS ltv FROM sales_ledger WHERE client_id IS NOT NULL GROUP BY client_id
+    ),
+    channel AS (
+      SELECT COALESCE(NULLIF(ft.source,'null'), 'Не определён') AS source, ids.client_id
+      FROM (
+        SELECT fitbase_id AS client_id FROM clients
+        UNION
+        SELECT DISTINCT client_id FROM sales_ledger WHERE client_id IS NOT NULL
+      ) ids
+      LEFT JOIN first_touch ft ON ft.client_id = ids.client_id
+    )
+    SELECT
+      ch.source,
+      COUNT(*)::int AS clients,
+      COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0)::int AS paying,
+      COALESCE(SUM(l.ltv), 0) AS ltv,
+      CASE WHEN COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0) > 0
+           THEN ROUND(SUM(l.ltv)::numeric / COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0), 0) END AS avg_ltv
+    FROM channel ch
+    LEFT JOIN ltv l ON l.client_id = ch.client_id
+    GROUP BY 1
+    ORDER BY ltv DESC
+  `);
+
   // Последний статус по каждому источнику (по одной строке на источник).
   const lastSync = await db.execute(sql`
     SELECT * FROM (
@@ -360,6 +419,12 @@ export async function GET(req: Request) {
   const paidCohortLtv = paidRows.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
   const romiCohortTotal = paidCost > 0 ? Math.round(((paidCohortLtv - paidCost) / paidCost) * 10000) / 10000 : null;
 
+  // Средний LTV клиента за всё время = вся выручка ÷ число платящих клиентов.
+  const lifeRows = lifetimeByChannel.rows as Array<Record<string, unknown>>;
+  const totalLtvAll = lifeRows.reduce((a, r) => a + Number(r.ltv || 0), 0);
+  const payingAll = lifeRows.reduce((a, r) => a + Number(r.paying || 0), 0);
+  const avgLtv = payingAll > 0 ? Math.round(totalLtvAll / payingAll) : null;
+
   return NextResponse.json({
     totals: {
       ...(totals.rows[0] ?? {}),
@@ -367,9 +432,11 @@ export async function GET(req: Request) {
       revenue: cashTotal, // касса за период (сходится с Fitbase)
       cohort_ltv: cohortLtvTotal, // LTV привлечённой когорты
       romi_cohort: romiCohortTotal, // когортный ROMI по платным каналам
+      avg_ltv: avgLtv, // средний LTV клиента за всё время
     },
     bySource: bySourceMerged,
     channelInfluence: channelInfluence.rows,
+    lifetimeByChannel: lifetimeByChannel.rows,
     byDate: byDate.rows,
     timeline: timeline.rows,
     lastSync: lastSync.rows,
