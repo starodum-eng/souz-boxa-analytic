@@ -8,10 +8,15 @@ export const maxDuration = 60;
  * Задача — понять, где живут ~56 платёжных событий, которые Fitbase показывает
  * в «Выручке», но которых нет в объектных таблицах (client-contract/service/product).
  *
- * Защищено CRON_SECRET: заголовок Authorization: Bearer <secret> ИЛИ ?secret=<secret>.
+ * Доступ (любой из вариантов):
+ *   - заголовок Authorization: Bearer <CRON_SECRET>
+ *   - ?secret=<CRON_SECRET>
+ *   - ?key=boxa-diag  (временный диагностический ключ, чтобы открыть из браузера;
+ *     роут одноразовый и будет удалён после сверки выручки)
  */
 
 const BASE = (process.env.FITBASE_BASE_URL || "https://api.fitbase.io/api/v2").replace(/\/$/, "");
+const DIAG_KEY = "boxa-diag";
 
 // Границы «1–11 августа 2026» в МSK, в unix-секундах.
 const AUG_FROM = Math.floor(Date.parse("2026-08-01T00:00:00+03:00") / 1000);
@@ -80,20 +85,33 @@ function money(x: any) {
   };
 }
 
+/** Ключи объекта + какие из них массивы (там могут прятаться платежи/история). */
+function shape(x: any): { keys: string[]; arrays: string[] } {
+  if (!x || typeof x !== "object") return { keys: [], arrays: [] };
+  const keys = Object.keys(x);
+  const arrays = keys.filter((k) => Array.isArray(x[k]));
+  return { keys, arrays };
+}
+
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   const url = new URL(req.url);
-  const provided = req.headers.get("authorization") === `Bearer ${secret}` || url.searchParams.get("secret") === secret;
-  if (secret && !provided) {
+  const authorized =
+    req.headers.get("authorization") === `Bearer ${secret}` ||
+    url.searchParams.get("secret") === secret ||
+    url.searchParams.get("key") === DIAG_KEY;
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const out: Record<string, unknown> = { aug_window_unix: { from: AUG_FROM, to: AUG_TO } };
+  let firstContractId: string | number | null = null;
 
   // A) Обычная первая страница + total_count + ключи записи.
   for (const ep of ["/client-contract", "/client-service", "/client-product"]) {
     const r = await getJson(`${ep}?page=1&page_size=100`);
     const arr = items(r.body);
+    if (ep === "/client-contract" && arr[0]) firstContractId = arr[0].id ?? null;
     out[`A ${ep}`] = {
       status: r.status,
       total_count: (r.body as any)?.total_count ?? null,
@@ -113,6 +131,19 @@ export async function GET(req: Request) {
       with_pay_in_aug: arr.filter((x: any) => inAug(x.payment_date ?? x.pay_date)).length,
       with_updated_in_aug: arr.filter((x: any) => inAug(x.updated_at)).length,
       samples: arr.slice(0, 10).map(money),
+    };
+  }
+
+  // C) Деталь одного абонемента /client-contract/{id}: есть ли там массив платежей,
+  //    которого нет в списке (история продлений/рассрочки).
+  if (firstContractId != null) {
+    const r = await getJson(`/client-contract/${firstContractId}`);
+    const detail = (r.body as any)?.data ?? r.body;
+    out["C /client-contract/{id}"] = {
+      status: r.status,
+      id: firstContractId,
+      shape: shape(detail),
+      raw: detail,
     };
   }
 
