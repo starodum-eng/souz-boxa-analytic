@@ -201,7 +201,6 @@ export default function Dashboard() {
   }
 
   const t = data?.totals;
-  const romi = t && Number(t.cost) > 0 ? (Number(t.revenue) - Number(t.cost)) / Number(t.cost) : null;
 
   return (
     <div className="container">
@@ -257,7 +256,6 @@ export default function Dashboard() {
               value={pct(t.romi_cohort ?? null)}
               className={t.romi_cohort != null && t.romi_cohort >= 0 ? "pos" : "neg"}
             />
-            <Kpi label="ROMI (касса)" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
           </div>
 
           <div className="card">
@@ -299,7 +297,6 @@ export default function Dashboard() {
                   <th title="Стоимость привлечения клиента = Расход ÷ Клиенты.">CAC</th>
                   <th title="Реальные оплаты за период (из отчёта Fitbase). Сходится с кассой Fitbase.">Касса</th>
                   <th title="Когортный ROMI: (LTV привлечённых за период клиентов − Расход) ÷ Расход. Честная окупаемость привлечения.">ROMI когорты</th>
-                  <th title="ROMI по кассе: (Касса − Расход) ÷ Расход. Учитывает все оплаты периода, включая продления старых клиентов.">ROMI (касса)</th>
                 </tr>
               </thead>
               <tbody>
@@ -316,14 +313,11 @@ export default function Dashboard() {
                     <td className={s.romiCohort != null ? (Number(s.romiCohort) >= 0 ? "pos" : "neg") : "muted"}>
                       {pct(s.romiCohort)}
                     </td>
-                    <td className={s.romi != null ? (Number(s.romi) >= 0 ? "pos" : "neg") : "muted"}>
-                      {pct(s.romi)}
-                    </td>
                   </tr>
                 ))}
                 {data.bySource.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                    <td colSpan={9} className="muted">Нет данных за период. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
@@ -343,7 +337,6 @@ export default function Dashboard() {
                       <td className={data.totals.romi_cohort != null ? (data.totals.romi_cohort >= 0 ? "pos" : "neg") : "muted"}>
                         {pct(data.totals.romi_cohort ?? null)}
                       </td>
-                      <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
                     </tr>
                   </tfoot>
                 );
