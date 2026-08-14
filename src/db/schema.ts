@@ -206,6 +206,39 @@ export const clientPayments = pgTable(
 );
 
 /**
+ * Журнал продаж из отчёта Fitbase «Отчёт по продажам» (Финансы).
+ * Источник правды по ВЫРУЧКЕ: включает и онлайн-платежи CloudPayments/продления,
+ * которых нет в объектном API. Заливается вручную выгрузкой Excel из Fitbase.
+ * Привязка к каналу — по client_id (= clients.fitbase_id).
+ */
+export const salesLedger = pgTable(
+  "sales_ledger",
+  {
+    id: serial("id").primaryKey(),
+    // Синтетический ключ дедупа (у отчёта нет id платежа): клиент+дата+сумма+наименование.
+    extId: varchar("ext_id", { length: 200 }).notNull(),
+    clientId: varchar("client_id", { length: 128 }), // ID клиента Fitbase → join к clients.fitbase_id
+    clientName: varchar("client_name", { length: 256 }),
+    payDate: timestamp("pay_date", { withTimezone: true }),
+    accrualDate: timestamp("accrual_date", { withTimezone: true }),
+    // «Итого» из отчёта — фактически оплаченная сумма (после скидок, с учётом пробных = 0).
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    method: varchar("method", { length: 64 }), // Карта | CloudPayments | Наличные
+    kind: varchar("kind", { length: 64 }), // Абонемент | Услуга | Товар
+    name: varchar("name", { length: 512 }),
+    category: varchar("category", { length: 256 }),
+    manager: varchar("manager", { length: 256 }),
+    raw: jsonb("raw"),
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sales_ledger_ext_uniq").on(t.extId),
+    index("sales_ledger_paydate_idx").on(t.payDate),
+    index("sales_ledger_client_idx").on(t.clientId),
+  ],
+);
+
+/**
  * Визиты клиентов Fitbase (/v2/client/visits) — посещаемость по дням.
  */
 export const clientVisits = pgTable(

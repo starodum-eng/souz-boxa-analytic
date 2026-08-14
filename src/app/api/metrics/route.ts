@@ -100,22 +100,28 @@ export async function GET(req: Request) {
     ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
-      FROM client_payments WHERE client_id IS NOT NULL AND paid = 1 GROUP BY client_id
+      FROM sales_ledger WHERE client_id IS NOT NULL GROUP BY client_id
     ),
-    -- касса за период: все оплаты (абонементы+услуги+товары) по дате платежа
+    -- касса за период: выручка из отчёта Fitbase «Отчёт по продажам» (журнал sales_ledger).
+    -- Здесь есть онлайн-платежи/продления CloudPayments, которых нет в объектном API.
     cash AS (
       SELECT client_id, SUM(amount) AS cash
-      FROM client_payments
-      WHERE client_id IS NOT NULL AND paid = 1 AND pay_date IS NOT NULL
+      FROM sales_ledger
+      WHERE client_id IS NOT NULL AND pay_date IS NOT NULL
         AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
         AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
       GROUP BY client_id
     ),
-    -- канал привлечения каждого клиента (или «Не определён», если следа нет)
+    -- канал привлечения клиента. Берём id из клиентов И из журнала продаж —
+    -- чтобы касса клиента, которого нет в справочнике clients, тоже попала в итог.
     client_channel AS (
-      SELECT c.fitbase_id AS client_id, ft.ts, COALESCE(ft.source, 'Не определён') AS source
-      FROM clients c
-      LEFT JOIN first_touch ft ON ft.client_id = c.fitbase_id
+      SELECT ids.client_id, ft.ts, COALESCE(ft.source, 'Не определён') AS source
+      FROM (
+        SELECT fitbase_id AS client_id FROM clients
+        UNION
+        SELECT DISTINCT client_id FROM sales_ledger WHERE client_id IS NOT NULL
+      ) ids
+      LEFT JOIN first_touch ft ON ft.client_id = ids.client_id
     )
     SELECT
       cc.source,
@@ -177,7 +183,7 @@ export async function GET(req: Request) {
     ),
     ltv AS (
       SELECT client_id, SUM(amount) AS ltv
-      FROM client_payments WHERE client_id IS NOT NULL AND paid = 1 GROUP BY client_id
+      FROM sales_ledger WHERE client_id IS NOT NULL GROUP BY client_id
     )
     SELECT
       ip.source,
@@ -204,8 +210,8 @@ export async function GET(req: Request) {
     sales AS (
       SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date,
         COUNT(*) AS sales_count, SUM(amount) AS revenue
-      FROM client_payments
-      WHERE paid = 1 AND pay_date IS NOT NULL GROUP BY 1
+      FROM sales_ledger
+      WHERE pay_date IS NOT NULL GROUP BY 1
     ),
     vis AS (
       SELECT (start_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS visits
