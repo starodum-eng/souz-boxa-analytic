@@ -68,28 +68,18 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  const url = new URL(req.url);
-
+  // Доступ закрывает middleware (Basic Auth дашборда) — отдельного ключа не нужно.
   let csvText = "";
-  let providedSecret = url.searchParams.get("key") ?? url.searchParams.get("secret") ?? "";
-  const authHeader = req.headers.get("authorization");
-  if (authHeader === `Bearer ${secret}`) providedSecret = secret ?? "";
-
   const ctype = req.headers.get("content-type") ?? "";
   if (ctype.includes("multipart/form-data")) {
     const form = await req.formData();
     const f = form.get("file");
-    if (form.get("secret")) providedSecret = String(form.get("secret"));
     if (f && typeof (f as File).text === "function") csvText = await (f as File).text();
     else if (form.get("csv")) csvText = String(form.get("csv"));
   } else {
     csvText = await req.text();
   }
 
-  if (secret && providedSecret !== secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   if (!csvText.trim()) {
     return NextResponse.json({ error: "Пустой файл. Ожидается CSV из «Отчёт по продажам»." }, { status: 400 });
   }
