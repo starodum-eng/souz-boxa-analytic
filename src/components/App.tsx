@@ -5,14 +5,16 @@ import Dashboard from "./Dashboard";
 import Sources from "./Sources";
 import Retention from "./Retention";
 import Import from "./Import";
+import Glossary from "./Glossary";
 
-export type TabKey = "dash" | "sources" | "retention" | "import";
+export type TabKey = "dash" | "sources" | "retention" | "import" | "help";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "dash", label: "Дашборд" },
   { key: "sources", label: "Источники" },
   { key: "retention", label: "Удержание" },
   { key: "import", label: "Импорт" },
+  { key: "help", label: "Справка" },
 ];
 
 export default function App({ initialTab = "dash" }: { initialTab?: TabKey }) {
@@ -41,6 +43,7 @@ export default function App({ initialTab = "dash" }: { initialTab?: TabKey }) {
       {tab === "sources" && <Sources />}
       {tab === "retention" && <Retention />}
       {tab === "import" && <Import />}
+      {tab === "help" && <Glossary />}
     </>
   );
 }
