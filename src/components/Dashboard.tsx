@@ -221,6 +221,20 @@ export default function Dashboard() {
           >
             ↑ Загрузить выручку
           </a>
+          <a
+            href="/retention"
+            className="sync-btn"
+            style={{
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              background: "transparent",
+              border: "1px solid var(--gold, #e0a53b)",
+              color: "var(--gold, #e0a53b)",
+            }}
+          >
+            Удержание
+          </a>
         </div>
       </div>
 
