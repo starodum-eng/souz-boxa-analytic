@@ -112,10 +112,14 @@ export async function POST(req: Request) {
     const amount = parseAmount(at(r, c.amount));
     const name = at(r, c.name).trim() || null;
     const method = at(r, c.method).trim() || null;
+    const kind = at(r, c.kind).trim() || null;
     const receipt = c.receipt >= 0 ? at(r, c.receipt).trim() : "";
 
-    // ext_id: устойчивый ключ дедупа (чек уникален; иначе — состав полей)
-    const keySrc = receipt || `${clientId}|${payDate?.toISOString() ?? ""}|${amount}|${name}|${method}`;
+    // ext_id: устойчивый ключ дедупа на УРОВНЕ ПОЗИЦИИ отчёта.
+    // Один чек может покрывать несколько позиций (абонемент + товар одной оплатой) —
+    // это разные строки с одинаковым чеком, поэтому одного номера чека мало.
+    // Все поля ключа стабильны между выгрузками, так что повторный импорт не плодит дубли.
+    const keySrc = [receipt, clientId ?? "", payDate?.toISOString() ?? "", amount, name ?? "", kind ?? "", method ?? ""].join("|");
     const extId = "sl_" + createHash("sha1").update(keySrc).digest("hex");
     if (seen.has(extId)) {
       skipped++;
@@ -131,7 +135,7 @@ export async function POST(req: Request) {
       accrualDate: parseRuDate(at(r, c.accrualDate)),
       amount: String(amount),
       method,
-      kind: at(r, c.kind).trim() || null,
+      kind,
       name,
       category: at(r, c.category).trim() || null,
       manager: at(r, c.manager).trim() || null,
