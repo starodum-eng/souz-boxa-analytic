@@ -311,9 +311,42 @@ export async function GET(req: Request) {
       romi: cost > 0 ? Math.round(((revenue - cost) / cost) * 10000) / 10000 : null,
     };
   });
+  // Полная касса за период из журнала продаж — источник правды (сходится с Fitbase),
+  // включая строки без привязки к клиенту (товары / анонимные продажи).
+  const revenueTotalRow = await db.execute(sql`
+    SELECT COALESCE(SUM(amount), 0) AS revenue
+    FROM sales_ledger
+    WHERE pay_date IS NOT NULL
+      AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+  `);
+  const revenueTotal = Number(revenueTotalRow.rows[0]?.revenue ?? 0);
+
+  // Разница между полной кассой и привязанной к каналам — неатрибутированные продажи
+  // (без ID клиента). Кладём в «Не определён», чтобы разбивка сходилась с итогом.
+  const attributed = bySourceMerged.reduce((a, r) => a + Number(r.revenue || 0), 0);
+  const unattributed = Math.round((revenueTotal - attributed) * 100) / 100;
+  if (unattributed > 0.5) {
+    const nd = bySourceMerged.find((r) => r.source === "Не определён");
+    if (nd) nd.revenue += unattributed;
+    else
+      bySourceMerged.push({
+        source: "Не определён",
+        cost: 0,
+        clicks: 0,
+        leads: 0,
+        clients: 0,
+        paying: 0,
+        revenue: unattributed,
+        cohortLtv: 0,
+        cpl: null,
+        cac: null,
+        romi: null,
+      });
+  }
   bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
 
-  const cashTotal = bySourceMerged.reduce((a, r) => a + Number(r.revenue || 0), 0);
+  const cashTotal = revenueTotal;
   const cohortLtvTotal = bySourceMerged.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
 
   return NextResponse.json({
