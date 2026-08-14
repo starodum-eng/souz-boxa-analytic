@@ -28,6 +28,7 @@ interface Totals {
   sales_count: number;
   revenue: number; // касса за период
   cohort_ltv: number; // LTV привлечённой когорты
+  romi_cohort: number | null; // когортный ROMI по платным каналам
   new_clients: number;
 }
 interface SourceRow {
@@ -41,6 +42,7 @@ interface SourceRow {
   cpl: number | null;
   cac: number | null;
   romi: number | null;
+  romiCohort: number | null;
 }
 interface InfluenceRow {
   source: string;
@@ -241,7 +243,12 @@ export default function Dashboard() {
             <Kpi label="Клиенты" value={num(t.new_clients)} />
             <Kpi label="Касса за период" value={rub(t.revenue)} />
             <Kpi label="LTV когорты" value={rub(t.cohort_ltv)} />
-            <Kpi label="ROMI" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
+            <Kpi
+              label="ROMI когорты"
+              value={pct(t.romi_cohort ?? null)}
+              className={t.romi_cohort != null && t.romi_cohort >= 0 ? "pos" : "neg"}
+            />
+            <Kpi label="ROMI (касса)" value={pct(romi)} className={romi != null && romi >= 0 ? "pos" : "neg"} />
           </div>
 
           <div className="card">
@@ -283,7 +290,8 @@ export default function Dashboard() {
                   <th title="Стоимость привлечения клиента = Расход ÷ Клиенты.">CAC</th>
                   <th title="Реальные оплаты за период (из отчёта Fitbase). Сходится с кассой Fitbase.">Касса</th>
                   <th title="Сколько принесут за всё время клиенты, привлечённые за период (сумма их оплат).">LTV когорты</th>
-                  <th title="Окупаемость рекламы = (Выручка − Расход) ÷ Расход × 100%.">ROMI</th>
+                  <th title="Когортный ROMI: (LTV когорты − Расход) ÷ Расход. Честная окупаемость привлечённых за период клиентов.">ROMI когорты</th>
+                  <th title="ROMI по кассе: (Касса − Расход) ÷ Расход. Учитывает все оплаты периода, включая продления старых клиентов.">ROMI (касса)</th>
                 </tr>
               </thead>
               <tbody>
@@ -298,6 +306,9 @@ export default function Dashboard() {
                     <td>{s.cac != null ? rub(s.cac) : "—"}</td>
                     <td>{rub(s.revenue)}</td>
                     <td className="muted">{rub(s.cohortLtv)}</td>
+                    <td className={s.romiCohort != null ? (Number(s.romiCohort) >= 0 ? "pos" : "neg") : "muted"}>
+                      {pct(s.romiCohort)}
+                    </td>
                     <td className={s.romi != null ? (Number(s.romi) >= 0 ? "pos" : "neg") : "muted"}>
                       {pct(s.romi)}
                     </td>
@@ -305,7 +316,7 @@ export default function Dashboard() {
                 ))}
                 {data.bySource.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="muted">Нет данных за период. Запустите синхронизацию.</td>
+                    <td colSpan={11} className="muted">Нет данных за период. Запустите синхронизацию.</td>
                   </tr>
                 )}
               </tbody>
@@ -323,6 +334,9 @@ export default function Dashboard() {
                       <td>{t.cac != null ? rub(t.cac) : "—"}</td>
                       <td>{rub(t.revenue)}</td>
                       <td className="muted">{rub(sumMetrics(data.bySource).cohortLtv)}</td>
+                      <td className={data.totals.romi_cohort != null ? (data.totals.romi_cohort >= 0 ? "pos" : "neg") : "muted"}>
+                        {pct(data.totals.romi_cohort ?? null)}
+                      </td>
                       <td className={t.romi != null ? (t.romi >= 0 ? "pos" : "neg") : "muted"}>{pct(t.romi)}</td>
                     </tr>
                   </tfoot>

@@ -308,7 +308,10 @@ export async function GET(req: Request) {
       cohortLtv: cr.cohortLtv, // LTV привлечённой за период когорты
       cpl: leads > 0 ? Math.round((cost / leads) * 100) / 100 : null,
       cac: cost > 0 && cr.clients > 0 ? Math.round((cost / cr.clients) * 100) / 100 : null,
+      // ROMI по кассе (все оплаты канала за период, включая продления старых клиентов)
       romi: cost > 0 ? Math.round(((revenue - cost) / cost) * 10000) / 10000 : null,
+      // ROMI когорты: LTV привлечённых за период клиентов против расхода на их привлечение
+      romiCohort: cost > 0 ? Math.round(((cr.cohortLtv - cost) / cost) * 10000) / 10000 : null,
     };
   });
   // Полная касса за период из журнала продаж — источник правды (сходится с Fitbase),
@@ -342,6 +345,7 @@ export async function GET(req: Request) {
         cpl: null,
         cac: null,
         romi: null,
+        romiCohort: null,
       });
   }
   bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
@@ -349,12 +353,20 @@ export async function GET(req: Request) {
   const cashTotal = revenueTotal;
   const cohortLtvTotal = bySourceMerged.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
 
+  // Когортный ROMI итого: считаем только по платным каналам (где есть расход),
+  // иначе органика с нулевым расходом раздувала бы окупаемость.
+  const paidRows = bySourceMerged.filter((r) => Number(r.cost) > 0);
+  const paidCost = paidRows.reduce((a, r) => a + Number(r.cost), 0);
+  const paidCohortLtv = paidRows.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
+  const romiCohortTotal = paidCost > 0 ? Math.round(((paidCohortLtv - paidCost) / paidCost) * 10000) / 10000 : null;
+
   return NextResponse.json({
     totals: {
       ...(totals.rows[0] ?? {}),
       new_clients: clientsAgg.rows[0]?.new_clients ?? 0,
       revenue: cashTotal, // касса за период (сходится с Fitbase)
       cohort_ltv: cohortLtvTotal, // LTV привлечённой когорты
+      romi_cohort: romiCohortTotal, // когортный ROMI по платным каналам
     },
     bySource: bySourceMerged,
     channelInfluence: channelInfluence.rows,
