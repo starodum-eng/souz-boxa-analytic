@@ -208,33 +208,6 @@ export default function Dashboard() {
           <button onClick={handleSync} disabled={syncing} className="sync-btn">
             {syncing ? "Обновление…" : "Обновить данные"}
           </button>
-          <a
-            href="/import"
-            className="sync-btn"
-            style={{
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              background: "var(--gold, #e0a53b)",
-              color: "#1a130c",
-            }}
-          >
-            ↑ Загрузить выручку
-          </a>
-          <a
-            href="/retention"
-            className="sync-btn"
-            style={{
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              background: "transparent",
-              border: "1px solid var(--gold, #e0a53b)",
-              color: "var(--gold, #e0a53b)",
-            }}
-          >
-            Удержание
-          </a>
         </div>
       </div>
 
