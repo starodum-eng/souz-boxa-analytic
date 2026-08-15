@@ -6,15 +6,23 @@ import { NextRequest, NextResponse } from "next/server";
  * Если они не заданы — доступ не блокируется (чтобы не залочить проект случайно).
  *
  * Исключения (работают без логина):
- *   /api/lead  — вебхук форм с сайта (внешний источник, свой CORS)
- *   /api/cron  — вызывается Vercel-кроном с Bearer CRON_SECRET (своя защита)
+ *   /api/lead        — вебхук форм с сайта (внешний источник, свой CORS)
+ *   /api/cron        — вызывается Vercel-кроном с Bearer CRON_SECRET (своя защита)
+ *   статические файлы — в т.ч. /lead-tracker.js, который грузит внешний сайт.
+ *     ВАЖНО: если закрыть их логином, браузер на стороне сайта показывает попап
+ *     авторизации при загрузке скрипта. Поэтому статику никогда не гейтим.
  */
 const PUBLIC_PREFIXES = ["/api/lead", "/api/cron"];
+// Любой файл с расширением (js/css/png/…) — публичная статика.
+const STATIC_FILE = /\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|txt|xml|json|pdf)$/i;
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+  if (
+    STATIC_FILE.test(pathname) ||
+    PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))
+  ) {
     return NextResponse.next();
   }
 
