@@ -3,6 +3,7 @@ import {
   pgEnum,
   serial,
   varchar,
+  text,
   date,
   timestamp,
   integer,
@@ -288,6 +289,20 @@ export const dailyMetrics = pgTable(
     index("daily_metrics_date_idx").on(t.date),
   ],
 );
+
+/**
+ * Кэш OAuth-токенов интеграций (одна строка на провайдера).
+ * Нужен, чтобы не плодить токены при каждом синке (у VK Ads лимит 5 токенов
+ * на client_id): держим один активный, обновляем по refresh_token.
+ */
+export const oauthTokens = pgTable("oauth_tokens", {
+  provider: varchar("provider", { length: 64 }).primaryKey(), // напр. 'vk_ads'
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  userId: varchar("user_id", { length: 128 }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Журнал синхронизаций — чтобы видеть на дашборде статус каждого источника.
