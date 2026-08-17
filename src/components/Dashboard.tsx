@@ -290,6 +290,41 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <div className="section-title">Юнит-экономика периода</div>
+          <div className="kpis">
+            {(() => {
+              const cac = Number(t.new_clients) > 0 ? Number(t.cost) / Number(t.new_clients) : null;
+              const ratio = t.avg_ltv != null && cac && cac > 0 ? Number(t.avg_ltv) / cac : null;
+              const drr = Number(t.revenue) > 0 ? Number(t.cost) / Number(t.revenue) : null;
+              const ratioCls = ratio == null ? "" : ratio >= 3 ? "pos" : ratio < 1 ? "neg" : "";
+              const ratioStr = ratio == null ? "—" : ratio.toFixed(1).replace(".", ",") + "×";
+              return (
+                <>
+                  <Kpi
+                    label="CAC"
+                    value={cac != null ? rub(cac) : "—"}
+                    title="Средняя стоимость клиента = рекламный расход ÷ все новые клиенты периода (blended)."
+                  />
+                  <Kpi
+                    label="LTV/CAC"
+                    value={ratioStr}
+                    className={ratioCls}
+                    title="Средний LTV клиента ÷ CAC. Ориентир здоровья юнит-экономики — от 3×."
+                  />
+                  <Kpi
+                    label="ДРР"
+                    value={drr != null ? pct(drr) : "—"}
+                    title="Доля рекламных расходов = расход ÷ выручка (касса) за период."
+                  />
+                </>
+              );
+            })()}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 4 }}>
+            CAC — «blended» (весь рекламный расход на всех новых клиентов, включая органических).
+            LTV/CAC берёт средний LTV за всё время против CAC периода.
+          </div>
+
           <div className="card">
             <div className="section-title" style={{ marginTop: 0 }}>Динамика</div>
             <div className="chart-wrap">
@@ -585,14 +620,16 @@ function Kpi({
   value,
   className,
   delta,
+  title,
 }: {
   label: string;
   value: string;
   className?: string;
   delta?: ReactNode;
+  title?: string;
 }) {
   return (
-    <div className="card kpi">
+    <div className="card kpi" title={title}>
       <div className="label">{label}</div>
       <div className={`value ${className ?? ""}`}>
         {value}
