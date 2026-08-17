@@ -241,16 +241,37 @@ export async function GET(req: Request) {
     LIMIT 5
   `);
 
+  // Непрерывный дневной ряд: расход/лиды из витрины, выручка — из журнала продаж
+  // (sales_ledger), как в byDate. Из daily_metrics выручку брать нельзя: витрина
+  // её не заполняет (там revenue=0), поэтому линия «Выручка» и лежала в нуле.
   const timeline = await db.execute(sql`
+    WITH days AS (
+      SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS date
+    ),
+    dm AS (
+      SELECT date, SUM(cost) AS cost, SUM(leads) AS leads
+      FROM daily_metrics
+      WHERE date >= ${from} AND date <= ${to}
+      GROUP BY date
+    ),
+    rev AS (
+      SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date,
+             SUM(amount) AS revenue
+      FROM sales_ledger
+      WHERE pay_date IS NOT NULL
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY 1
+    )
     SELECT
-      date,
-      COALESCE(SUM(cost), 0)    AS cost,
-      COALESCE(SUM(leads), 0)   AS leads,
-      COALESCE(SUM(revenue), 0) AS revenue
-    FROM daily_metrics
-    WHERE date >= ${from} AND date <= ${to}
-    GROUP BY date
-    ORDER BY date
+      d.date,
+      COALESCE(dm.cost, 0)     AS cost,
+      COALESCE(dm.leads, 0)    AS leads,
+      COALESCE(rev.revenue, 0) AS revenue
+    FROM days d
+    LEFT JOIN dm  ON dm.date  = d.date
+    LEFT JOIN rev ON rev.date = d.date
+    ORDER BY d.date
   `);
 
   // Новые клиенты Fitbase за период (CRM-конверсия, нижняя ступень воронки).
