@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -31,6 +31,7 @@ interface Totals {
   romi_cohort: number | null; // когортный ROMI по платным каналам
   avg_ltv: number | null; // средний LTV клиента за всё время
   new_clients: number;
+  paid_new: number; // новые клиенты периода с оплатой
 }
 interface LifetimeRow {
   source: string;
@@ -86,6 +87,7 @@ interface SyncRow {
 
 interface Data {
   totals: Totals;
+  prevTotals?: { cost: number; leads: number; new_clients: number; revenue: number };
   bySource: SourceRow[];
   channelInfluence: InfluenceRow[];
   lifetimeByChannel: LifetimeRow[];
@@ -201,6 +203,7 @@ export default function Dashboard() {
   }
 
   const t = data?.totals;
+  const p = data?.prevTotals;
 
   return (
     <div className="container">
@@ -246,16 +249,45 @@ export default function Dashboard() {
       {data && t && (
         <>
           <div className="kpis">
-            <Kpi label="Расход" value={rub(t.cost)} />
-            <Kpi label="Лиды" value={num(t.leads)} />
-            <Kpi label="Клиенты" value={num(t.new_clients)} />
-            <Kpi label="Касса за период" value={rub(t.revenue)} />
+            <Kpi label="Расход" value={rub(t.cost)} delta={<Delta cur={t.cost} prev={p?.cost ?? 0} mode="neutral" />} />
+            <Kpi label="Лиды" value={num(t.leads)} delta={<Delta cur={t.leads} prev={p?.leads ?? 0} />} />
+            <Kpi label="Клиенты" value={num(t.new_clients)} delta={<Delta cur={t.new_clients} prev={p?.new_clients ?? 0} />} />
+            <Kpi label="Касса за период" value={rub(t.revenue)} delta={<Delta cur={t.revenue} prev={p?.revenue ?? 0} />} />
             <Kpi label="Средний LTV клиента" value={t.avg_ltv != null ? rub(t.avg_ltv) : "—"} />
             <Kpi
               label="ROMI когорты"
               value={pct(t.romi_cohort ?? null)}
               className={t.romi_cohort != null && t.romi_cohort >= 0 ? "pos" : "neg"}
             />
+          </div>
+
+          <div className="section-title">Воронка периода</div>
+          <div className="card">
+            {(() => {
+              const conv = (a: number, b: number) => (Number(b) > 0 ? pct(Number(a) / Number(b)) : "—");
+              const Step = ({ fromL, fromV, toL, toV }: { fromL: string; fromV: number; toL: string; toV: number }) => (
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span className="muted">{fromL}</span>
+                  <b>{num(fromV)}</b>
+                  <span className="muted">→</span>
+                  <span className="muted">{toL}</span>
+                  <b>{num(toV)}</b>
+                  <span className="badge">{conv(toV, fromV)}</span>
+                </div>
+              );
+              return (
+                <div style={{ display: "grid", gap: 12 }}>
+                  <Step fromL="Визиты" fromV={t.visits} toL="Лиды" toV={t.leads} />
+                  <Step fromL="Лиды" fromV={t.leads} toL="Клиенты" toV={t.new_clients} />
+                  <Step fromL="Клиенты" fromV={t.new_clients} toL="Оплатили" toV={t.paid_new} />
+                </div>
+              );
+            })()}
+            <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              Конверсии Визит→Лид считаются по Метрике, Лид→Клиент — межсистемно
+              (Метрика → Fitbase) и носят ориентировочный характер; Клиент→Оплата — доля
+              новых клиентов периода, сделавших оплату.
+            </div>
           </div>
 
           <div className="card">
@@ -548,11 +580,45 @@ function sumMetrics(rows: readonly unknown[]) {
   };
 }
 
-function Kpi({ label, value, className }: { label: string; value: string; className?: string }) {
+function Kpi({
+  label,
+  value,
+  className,
+  delta,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+  delta?: ReactNode;
+}) {
   return (
     <div className="card kpi">
       <div className="label">{label}</div>
-      <div className={`value ${className ?? ""}`}>{value}</div>
+      <div className={`value ${className ?? ""}`}>
+        {value}
+        {delta}
+      </div>
     </div>
+  );
+}
+
+/** Δ% к прошлому периоду. Для расхода рост не «плохой» — режим neutral. */
+function Delta({
+  cur,
+  prev,
+  mode = "up-good",
+}: {
+  cur: number;
+  prev: number;
+  mode?: "up-good" | "neutral";
+}) {
+  if (!prev) return null; // нет базы за прошлый период — не показываем
+  const d = (cur - prev) / prev;
+  const up = d >= 0;
+  const cls = mode === "neutral" ? "muted" : up ? "pos" : "neg";
+  return (
+    <span className={cls} style={{ fontSize: 12, marginLeft: 6 }}>
+      {up ? "▲" : "▼"} {Math.abs(d * 100).toFixed(0)}%
+    </span>
   );
 }

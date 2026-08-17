@@ -25,6 +25,16 @@ export async function GET(req: Request) {
     valid(url.searchParams.get("from")) ??
     ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
 
+  // Предыдущий период той же длины, впритык до from (для сравнения Δ%).
+  const parseYmd = (s: string) => {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d); // локальная полночь — без TZ-сдвига
+  };
+  const _f = parseYmd(from);
+  const lenDays = Math.round((parseYmd(to).getTime() - _f.getTime()) / 86400000) + 1;
+  const prevTo = ymd(new Date(_f.getFullYear(), _f.getMonth(), _f.getDate() - 1));
+  const prevFrom = ymd(new Date(_f.getFullYear(), _f.getMonth(), _f.getDate() - lenDays));
+
   const totals = await db.execute(sql`
     SELECT
       COALESCE(SUM(cost), 0)        AS cost,
@@ -282,6 +292,36 @@ export async function GET(req: Request) {
       AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
   `);
 
+  // Нижняя ступень воронки: новые клиенты периода, сделавшие хотя бы одну оплату
+  // (подмножество new_clients → конверсия Клиент→Оплата всегда ≤ 100%).
+  const paidNewAgg = await db.execute(sql`
+    SELECT COUNT(*)::int AS paid_new
+    FROM clients c
+    WHERE (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      AND EXISTS (
+        SELECT 1 FROM sales_ledger s
+        WHERE s.client_id = c.fitbase_id AND s.amount > 0
+      )
+  `);
+
+  // Предыдущий период — те же источники, что и текущие KPI (для Δ% «яблоки к яблокам»).
+  const prevAd = await db.execute(sql`
+    SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(leads),0) AS leads
+    FROM daily_metrics WHERE date >= ${prevFrom} AND date <= ${prevTo}
+  `);
+  const prevClients = await db.execute(sql`
+    SELECT COUNT(*)::int AS new_clients FROM clients
+    WHERE (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${prevFrom}
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${prevTo}
+  `);
+  const prevRevenue = await db.execute(sql`
+    SELECT COALESCE(SUM(amount),0) AS revenue FROM sales_ledger
+    WHERE pay_date IS NOT NULL
+      AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${prevFrom}
+      AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${prevTo}
+  `);
+
   // LTV по каналам ПРИВЛЕЧЕНИЯ за ВСЁ время (не зависит от периода): какой канал
   // приводит самых денежных клиентов. Канал — по первому касанию, LTV — все оплаты.
   const lifetimeByChannel = await db.execute(sql`
@@ -450,10 +490,17 @@ export async function GET(req: Request) {
     totals: {
       ...(totals.rows[0] ?? {}),
       new_clients: clientsAgg.rows[0]?.new_clients ?? 0,
+      paid_new: paidNewAgg.rows[0]?.paid_new ?? 0, // новые клиенты периода с оплатой
       revenue: cashTotal, // касса за период (сходится с Fitbase)
       cohort_ltv: cohortLtvTotal, // LTV привлечённой когорты
       romi_cohort: romiCohortTotal, // когортный ROMI по платным каналам
       avg_ltv: avgLtv, // средний LTV клиента за всё время
+    },
+    prevTotals: {
+      cost: Number(prevAd.rows[0]?.cost ?? 0),
+      leads: Number(prevAd.rows[0]?.leads ?? 0),
+      new_clients: Number(prevClients.rows[0]?.new_clients ?? 0),
+      revenue: Number(prevRevenue.rows[0]?.revenue ?? 0),
     },
     bySource: bySourceMerged,
     channelInfluence: channelInfluence.rows,
