@@ -211,21 +211,34 @@ export async function GET(req: Request) {
   const byDate = await db.execute(sql`
     WITH dm AS (
       SELECT date, SUM(cost) AS cost, SUM(leads) AS leads
-      FROM daily_metrics GROUP BY date
+      FROM daily_metrics
+      WHERE date >= ${from} AND date <= ${to}
+      GROUP BY date
     ),
     cl AS (
       SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS clients
-      FROM clients WHERE created_at IS NOT NULL GROUP BY 1
+      FROM clients
+      WHERE created_at IS NOT NULL
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY 1
     ),
     sales AS (
       SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date,
         COUNT(*) AS sales_count, SUM(amount) AS revenue
       FROM sales_ledger
-      WHERE pay_date IS NOT NULL GROUP BY 1
+      WHERE pay_date IS NOT NULL
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY 1
     ),
     vis AS (
       SELECT (start_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS visits
-      FROM client_visits WHERE start_at IS NOT NULL GROUP BY 1
+      FROM client_visits
+      WHERE start_at IS NOT NULL
+        AND (start_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (start_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY 1
     ),
     dates AS (
       SELECT date FROM dm
@@ -235,20 +248,19 @@ export async function GET(req: Request) {
     )
     SELECT
       d.date,
-      COALESCE(dm.cost, 0)         AS cost,
-      COALESCE(dm.leads, 0)        AS leads,
+      COALESCE(dm.cost, 0)           AS cost,
+      COALESCE(dm.leads, 0)          AS leads,
       CASE WHEN dm.leads > 0 THEN ROUND(dm.cost/dm.leads, 2) END AS cpl,
-      COALESCE(cl.clients, 0)      AS clients,
+      COALESCE(cl.clients, 0)        AS clients,
       COALESCE(sales.sales_count, 0) AS sales_count,
-      COALESCE(sales.revenue, 0)   AS revenue,
-      COALESCE(vis.visits, 0)      AS visits
+      COALESCE(sales.revenue, 0)     AS revenue,
+      COALESCE(vis.visits, 0)        AS visits
     FROM dates d
-    LEFT JOIN dm ON dm.date = d.date
-    LEFT JOIN cl ON cl.date = d.date
+    LEFT JOIN dm    ON dm.date    = d.date
+    LEFT JOIN cl    ON cl.date    = d.date
     LEFT JOIN sales ON sales.date = d.date
-    LEFT JOIN vis ON vis.date = d.date
+    LEFT JOIN vis   ON vis.date   = d.date
     ORDER BY d.date DESC
-    LIMIT 5
   `);
 
   // Непрерывный дневной ряд: расход/лиды из витрины, выручка — из журнала продаж

@@ -332,7 +332,8 @@ export default function Dashboard() {
                 <LineChart data={data.timeline}>
                   <CartesianGrid stroke="#38302a" strokeDasharray="3 3" />
                   <XAxis dataKey="date" stroke="#a8998c" fontSize={12} />
-                  <YAxis stroke="#a8998c" fontSize={12} />
+                  <YAxis yAxisId="left" stroke="#a8998c" fontSize={12} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#e0a53b" fontSize={12} />
                   <Tooltip
                     contentStyle={{ background: "#201a16", border: "1px solid #38302a", borderRadius: 8 }}
                     formatter={(v: number, name) =>
@@ -340,9 +341,9 @@ export default function Dashboard() {
                     }
                   />
                   <Legend />
-                  <Line type="monotone" dataKey="cost" name="Расход" stroke="#e0271b" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="revenue" name="Выручка" stroke="#46c07a" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="leads" name="Лиды" stroke="#e0a53b" dot={false} strokeWidth={2} />
+                  <Line yAxisId="left" type="monotone" dataKey="cost" name="Расход" stroke="#e0271b" dot={false} strokeWidth={2} />
+                  <Line yAxisId="left" type="monotone" dataKey="revenue" name="Выручка" stroke="#46c07a" dot={false} strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="leads" name="Лиды" stroke="#e0a53b" dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -480,7 +481,9 @@ export default function Dashboard() {
             </table>
           </div>
 
-          <div className="section-title">По дням (5 дней)</div>
+          <div className="section-title">
+            По дням · {PRESETS.find((p) => p.key === preset)?.label ?? `${from} — ${to}`}
+          </div>
           <div className="card">
             <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
               <b style={{ color: "var(--accent)" }}>Слева — маркетинг/лиды</b> (из рекламы и Метрики):
@@ -488,7 +491,7 @@ export default function Dashboard() {
               <b style={{ color: "var(--gold)", marginLeft: 8 }}>Справа — Fitbase</b> (факт из клуба):
               продажи и выручка по дате платежа (касса дня) и посещения (визиты клиентов).
             </div>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
               <table className="split-table">
                 <thead>
                   <tr>
