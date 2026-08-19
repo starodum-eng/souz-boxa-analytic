@@ -95,6 +95,14 @@ body {
 .tabs {
   display: flex;
   gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  scrollbar-width: none; /* Firefox */
+}
+.tabs::-webkit-scrollbar {
+  display: none; /* WebKit — прячем полосу */
 }
 .tab {
   background: none;
@@ -107,6 +115,8 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .tab:hover {
   color: var(--text);
@@ -566,4 +576,19 @@ td.msg {
 .controls button.sync-btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ── Мобильная раскладка шапки: бренд сверху, табы — во всю ширину со скроллом ── */
+@media (max-width: 640px) {
+  .topbar-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .brand {
+    padding: 12px 0 0;
+  }
+  .tabs {
+    padding-bottom: 4px;
+  }
 }
