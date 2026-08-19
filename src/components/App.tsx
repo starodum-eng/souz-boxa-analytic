@@ -7,14 +7,16 @@ import Retention from "./Retention";
 import Import from "./Import";
 import Glossary from "./Glossary";
 import Targets from "./Targets";
+import Cohorts from "./Cohorts";
 
-export type TabKey = "dash" | "targets" | "sources" | "retention" | "import" | "help";
+export type TabKey = "dash" | "targets" | "sources" | "retention" | "cohorts" | "import" | "help";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "dash", label: "Дашборд" },
   { key: "targets", label: "Цели" },
   { key: "sources", label: "Источники" },
   { key: "retention", label: "Удержание" },
+  { key: "cohorts", label: "Когорты" },
   { key: "import", label: "Импорт" },
   { key: "help", label: "Справка" },
 ];
@@ -45,6 +47,7 @@ export default function App({ initialTab = "dash" }: { initialTab?: TabKey }) {
       {tab === "targets" && <Targets />}
       {tab === "sources" && <Sources />}
       {tab === "retention" && <Retention />}
+      {tab === "cohorts" && <Cohorts />}
       {tab === "import" && <Import />}
       {tab === "help" && <Glossary />}
     </>
