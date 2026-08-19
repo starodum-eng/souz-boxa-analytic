@@ -11,6 +11,7 @@ export interface Platform {
 export const PLATFORMS: Platform[] = [
   { key: "vk", label: "VK", color: "#2787F5" },
   { key: "telegram", label: "Telegram", color: "#29A9EB" },
+  { key: "max", label: "MAX", color: "#6C5CE7" },
   { key: "instagram", label: "Instagram", color: "#C13584" },
   { key: "youtube", label: "YouTube", color: "#FF0000" },
   { key: "tiktok", label: "TikTok", color: "#EE1D52" },

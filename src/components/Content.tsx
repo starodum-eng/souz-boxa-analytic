@@ -153,8 +153,8 @@ export default function Content() {
     <div className="container">
       <div className="header">
         <div>
-          <h1>Контент</h1>
-          <div className="sub">Недельный отчёт SMM: публикации, охват, аудитория. Верх воронки.</div>
+          <h1>СММ</h1>
+          <div className="sub">Недельный отчёт по соцсетям: публикации, охват, аудитория. Верх воронки.</div>
         </div>
         <div className="controls">
           <button onClick={() => setWeek(addDaysStr(week, -7))}>‹</button>

@@ -18,7 +18,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "sources", label: "Источники" },
   { key: "retention", label: "Удержание" },
   { key: "cohorts", label: "Когорты" },
-  { key: "content", label: "Контент" },
+  { key: "content", label: "СММ" },
   { key: "import", label: "Импорт" },
   { key: "help", label: "Справка" },
 ];
