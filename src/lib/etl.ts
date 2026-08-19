@@ -142,8 +142,14 @@ export async function runFullSync(): Promise<SyncResult[]> {
         });
     }
 
-    // Лиды воронки (атрибуция канала + этап).
+    // Лиды воронки (атрибуция канала + этап). fetchFitbaseLeads возвращает ПОЛНЫЙ
+    // набор нужной воронки за раз, поэтому делаем полное обновление таблицы:
+    // при непустом наборе чистим старые лиды (в т.ч. других воронок с прошлых синков),
+    // затем вставляем отфильтрованный набор. Пустой ответ таблицу НЕ обнуляет.
     const leadRows = dedupe(leadsRaw.filter((l) => l.fitbaseId));
+    if (leadRows.length > 0) {
+      await db.execute(sql`DELETE FROM fitbase_leads`);
+    }
     for (let i = 0; i < leadRows.length; i += CHUNK) {
       const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
       await db
@@ -159,6 +165,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
             utmCampaign: sql`excluded.utm_campaign`,
             advertisingSource: sql`excluded.advertising_source`,
             funnelStep: sql`excluded.funnel_step`,
+            funnelId: sql`excluded.funnel_id`,
             budget: sql`excluded.budget`,
             createdAt: sql`excluded.created_at`,
             updatedAt: new Date(),

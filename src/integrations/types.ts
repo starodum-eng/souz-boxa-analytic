@@ -66,6 +66,7 @@ export interface FitbaseLeadRow {
   utmCampaign: string | null;
   advertisingSource: string | null; // Сайт/Звонок/Трафик (справочник Fitbase)
   funnelStep: string | null;
+  funnelId: string | null; // id воронки (funnels_id) — фильтр «Новые лиды»
   budget: number;
   createdAt: Date | null;
   raw?: unknown;

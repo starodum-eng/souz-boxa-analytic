@@ -1,0 +1,1 @@
+ALTER TABLE "fitbase_leads" ADD COLUMN "funnel_id" varchar(64);

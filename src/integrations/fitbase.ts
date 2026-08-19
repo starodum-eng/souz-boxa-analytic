@@ -146,10 +146,19 @@ export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[
   }));
 }
 
-/** Лиды из воронки (/v2/lead) — с UTM, этапом, источником, бюджетом, client_id. */
+/**
+ * Лиды из воронки (/v2/lead) — с UTM, этапом, источником, бюджетом, client_id.
+ * По бизнес-логике работаем только с воронкой «Новые лиды» (funnels_id=1):
+ * фильтруем по FITBASE_LEADS_FUNNEL_ID (пусто → все воронки, обратная совместимость).
+ * id воронки — поле `funnels_id`; эндпоинт также принимает query `funnel_id`.
+ */
 export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadRow[]> {
-  const items = await fetchAllPages("/lead", "/lead");
-  return items.map((l) => ({
+  const FUNNEL = (process.env.FITBASE_LEADS_FUNNEL_ID ?? "1").trim();
+  // Пробрасываем funnel_id в запрос (если API учтёт — не тянем лишнее);
+  // клиентский фильтр ниже — источник правды на случай, если параметр игнорируется.
+  const path = FUNNEL ? `/lead?funnel_id=${encodeURIComponent(FUNNEL)}` : "/lead";
+  const items = await fetchAllPages(path, "/lead");
+  const mapped = items.map((l) => ({
     fitbaseId: String(l.id ?? ""),
     clientId: l.client_id != null ? String(l.client_id) : null,
     phoneNorm: normalizePhone(l.phone),
@@ -163,10 +172,12 @@ export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadR
         : l.advertising_source) ?? null,
     funnelStep:
       l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
+    funnelId: l.funnels_id != null ? String(l.funnels_id) : null,
     budget: Number(l.budget) || 0,
     createdAt: toDate(l.created_at),
     raw: l,
   }));
+  return FUNNEL ? mapped.filter((r) => r.funnelId === FUNNEL) : mapped;
 }
 
 /** Визиты клиентов (/v2/client/visits) — посещаемость. Тянем недавние по updated_at. */
