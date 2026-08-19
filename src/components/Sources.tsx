@@ -79,6 +79,7 @@ export default function Sources() {
 
       {items && (
         <div className="card">
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -147,6 +148,7 @@ export default function Sources() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -154,6 +156,7 @@ export default function Sources() {
         <>
           <div className="section-title">Скрытые метки ({hidden.length})</div>
           <div className="card">
+            <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -174,6 +177,7 @@ export default function Sources() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

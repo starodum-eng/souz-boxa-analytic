@@ -80,6 +80,7 @@ export default function Retention() {
 
           <div className="section-title">Структура продаж за 30 дней</div>
           <div className="card">
+            <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -98,10 +99,12 @@ export default function Retention() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="section-title">📞 Кому звонить · заканчиваются / истекли ({data.callList.length})</div>
           <div className="card">
+            <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -144,10 +147,12 @@ export default function Retention() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="section-title">🚪 Не ходят · активный абонемент, нет визитов 14+ дней ({data.atRisk.length})</div>
           <div className="card">
+            <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -177,6 +182,7 @@ export default function Retention() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

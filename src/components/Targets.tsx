@@ -87,6 +87,7 @@ export default function Targets() {
       {toast && <div className="card muted" style={{ marginBottom: 16 }}>{toast}</div>}
 
       <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -126,6 +127,7 @@ export default function Targets() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
         Проценты вводите как проценты (например 25 = 25%). Пустое поле снимает цель по метрике.

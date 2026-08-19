@@ -27,6 +27,17 @@ body {
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden; /* backstop: широкая таблица не тянет всю страницу вбок */
+}
+
+/* Обёртка для таблиц: горизонтальный скролл внутри карточки на узких экранах */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.table-wrap > table {
+  min-width: max-content; /* держит ширину → включает скролл вместо переноса */
 }
 
 .display {
