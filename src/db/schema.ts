@@ -291,6 +291,29 @@ export const dailyMetrics = pgTable(
 );
 
 /**
+ * Недельные показатели SMM по площадкам (ручной ввод во вкладке «Контент»).
+ * Неделя = дата понедельника (МСК). Заявки/клиенты сюда НЕ вводятся — они
+ * приходят из CRM-атрибуции. Это верх воронки: контент, охват, аудитория.
+ */
+export const smmWeekly = pgTable(
+  "smm_weekly",
+  {
+    id: serial("id").primaryKey(),
+    weekStart: date("week_start").notNull(), // понедельник недели
+    platform: varchar("platform", { length: 16 }).notNull(),
+    posts: integer("posts").notNull().default(0),
+    reach: integer("reach").notNull().default(0),
+    engagement: integer("engagement").notNull().default(0),
+    followers: integer("followers").notNull().default(0), // всего на конец недели
+    clicks: integer("clicks").notNull().default(0),
+    spend: numeric("spend", { precision: 14, scale: 2 }).notNull().default("0"),
+    note: varchar("note", { length: 512 }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("smm_weekly_uniq").on(t.weekStart, t.platform)],
+);
+
+/**
  * Плановые KPI по месяцам (ручной ввод во вкладке «Цели»).
  * Одна строка = цель по метрике на месяц. Факт считается из данных на лету.
  */
