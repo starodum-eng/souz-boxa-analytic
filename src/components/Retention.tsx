@@ -16,7 +16,7 @@ const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU") + " ₽";
 const dstr = (v: unknown) => (v ? String(v) : "—");
 
 // Ссылка на карточку клиента в Fitbase (веб-кабинет клуба).
-const FITBASE_CLIENT_URL = (id: unknown) => `https://soyuz-boksa.fitbase.io/client/${id}`;
+const FITBASE_CLIENT_URL = (id: unknown) => `https://soyuz-boksa.fitbase.io/clients/index?clientModal=${id}`;
 function clientLink(name: unknown, id: unknown) {
   const n = name ? String(name) : "—";
   if (id == null || id === "") return n;
@@ -54,7 +54,7 @@ export default function Retention() {
         </div>
       </div>
 
-      {err && <div className="card" style={{ color: "#e0827b" }}>Ошибка: {err}</div>}
+      {err && <div className="card" style={{ color: "var(--red)" }}>Ошибка: {err}</div>}
       {!data && !err && <div className="card muted">Загрузка…</div>}
 
       {data && (
@@ -70,11 +70,11 @@ export default function Retention() {
             </div>
             <div className="card kpi">
               <div className="label">Истекли (за 7 дней)</div>
-              <div className="value" style={{ color: "#e0827b" }}>{String(s.expired_7d ?? 0)}</div>
+              <div className="value" style={{ color: "var(--red)" }}>{String(s.expired_7d ?? 0)}</div>
             </div>
             <div className="card kpi">
               <div className="label">Не ходят 14+ дней</div>
-              <div className="value" style={{ color: "#e0827b" }}>{String(s.no_visit_14d ?? 0)}</div>
+              <div className="value" style={{ color: "var(--red)" }}>{String(s.no_visit_14d ?? 0)}</div>
             </div>
           </div>
 
@@ -119,12 +119,19 @@ export default function Retention() {
                     <td style={{ textAlign: "left" }}>{clientLink(r.name, r.client_id)}</td>
                     <td style={{ textAlign: "left" }}>{dstr(r.tariff)}</td>
                     <td style={{ textAlign: "center" }}>{dstr(r.end_d)}</td>
-                    <td style={{ textAlign: "center", color: Number(r.days_left) < 0 ? "#e0827b" : "inherit" }}>
+                    <td style={{ textAlign: "center", color: Number(r.days_left) < 0 ? "var(--red)" : "inherit" }}>
                       {Number(r.days_left) < 0 ? `просрочен ${-Number(r.days_left)}` : String(r.days_left)}
                     </td>
                     <td style={{ textAlign: "center" }}>{dstr(r.last_visit_d)}</td>
                     <td style={{ textAlign: "center" }}>
-                      <span className="badge" style={{ background: r.state === "истёк" ? "#5a2620" : "#5a4620" }}>
+                      <span
+                        className="badge"
+                        style={
+                          r.state === "истёк"
+                            ? { background: "rgba(224,39,27,0.12)", color: "var(--red)", borderColor: "rgba(224,39,27,0.3)" }
+                            : { background: "rgba(224,165,59,0.16)", color: "#a9781f", borderColor: "rgba(224,165,59,0.45)" }
+                        }
+                      >
                         {String(r.state)}
                       </span>
                     </td>
@@ -158,7 +165,7 @@ export default function Retention() {
                     <td style={{ textAlign: "left" }}>{dstr(r.tariff)}</td>
                     <td style={{ textAlign: "center" }}>{dstr(r.end_d)}</td>
                     <td style={{ textAlign: "center" }}>{r.last_visit_d ? String(r.last_visit_d) : "не был(а)"}</td>
-                    <td style={{ textAlign: "center", color: "#e0827b" }}>
+                    <td style={{ textAlign: "center", color: "var(--red)" }}>
                       {r.days_since_visit != null ? String(r.days_since_visit) : "—"}
                     </td>
                   </tr>
