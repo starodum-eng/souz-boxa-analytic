@@ -38,10 +38,10 @@ export default function Import() {
 
   const box: React.CSSProperties = {
     padding: 10,
-    background: "#1c1712",
-    border: "1px solid #3a2f26",
+    background: "var(--panel)",
+    border: "1px solid var(--border)",
     borderRadius: 8,
-    color: "inherit",
+    color: "var(--text)",
   };
 
   return (
@@ -92,13 +92,13 @@ export default function Import() {
       </form>
 
       {error && (
-        <div className="card" style={{ marginTop: 18, background: "#3a1512", border: "1px solid #7a2a20", fontSize: 14 }}>
+        <div className="card" style={{ marginTop: 18, background: "rgba(224,39,27,0.08)", border: "1px solid rgba(224,39,27,0.35)", color: "var(--text)", fontSize: 14 }}>
           ⚠️ {error}
         </div>
       )}
 
       {result && (
-        <div className="card" style={{ marginTop: 18, background: "#152012", border: "1px solid #2f5a26", fontSize: 14 }}>
+        <div className="card" style={{ marginTop: 18, background: "rgba(26,160,83,0.08)", border: "1px solid rgba(26,160,83,0.35)", color: "var(--text)", fontSize: 14 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>✅ Загружено</div>
           <div>Строк: <b>{String(result.parsed_rows)}</b></div>
           <div>Сумма «Оплачено»: <b>{Number(result.sum_paid).toLocaleString("ru-RU")} ₽</b></div>
