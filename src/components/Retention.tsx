@@ -14,13 +14,20 @@ interface Data {
 
 const money = (v: unknown) => Number(v || 0).toLocaleString("ru-RU") + " ₽";
 const dstr = (v: unknown) => (v ? String(v) : "—");
-function phoneLink(p: unknown) {
-  const raw = String(p ?? "").trim();
-  if (!raw) return "—";
-  const tel = raw.replace(/[^\d+]/g, "");
+
+// Ссылка на карточку клиента в Fitbase (веб-кабинет клуба).
+const FITBASE_CLIENT_URL = (id: unknown) => `https://soyuz-boksa.fitbase.io/client/${id}`;
+function clientLink(name: unknown, id: unknown) {
+  const n = name ? String(name) : "—";
+  if (id == null || id === "") return n;
   return (
-    <a href={`tel:${tel}`} style={{ color: "var(--gold, #e0a53b)", textDecoration: "none" }}>
-      {raw}
+    <a
+      href={FITBASE_CLIENT_URL(id)}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ color: "var(--link, #2b7fd4)", textDecoration: "none", borderBottom: "1px dotted var(--link, #2b7fd4)" }}
+    >
+      {n}
     </a>
   );
 }
@@ -99,7 +106,6 @@ export default function Retention() {
               <thead>
                 <tr>
                   <th style={{ textAlign: "left" }}>Клиент</th>
-                  <th style={{ textAlign: "left" }}>Телефон</th>
                   <th style={{ textAlign: "left" }}>Абонемент</th>
                   <th>Окончание</th>
                   <th>Осталось дней</th>
@@ -110,8 +116,7 @@ export default function Retention() {
               <tbody>
                 {data.callList.map((r, i) => (
                   <tr key={i}>
-                    <td style={{ textAlign: "left" }}>{dstr(r.name)}</td>
-                    <td style={{ textAlign: "left" }}>{phoneLink(r.phone)}</td>
+                    <td style={{ textAlign: "left" }}>{clientLink(r.name, r.client_id)}</td>
                     <td style={{ textAlign: "left" }}>{dstr(r.tariff)}</td>
                     <td style={{ textAlign: "center" }}>{dstr(r.end_d)}</td>
                     <td style={{ textAlign: "center", color: Number(r.days_left) < 0 ? "#e0827b" : "inherit" }}>
@@ -127,7 +132,7 @@ export default function Retention() {
                 ))}
                 {data.callList.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="muted" style={{ textAlign: "center" }}>Нет заканчивающихся абонементов</td>
+                    <td colSpan={6} className="muted" style={{ textAlign: "center" }}>Нет заканчивающихся абонементов</td>
                   </tr>
                 )}
               </tbody>
@@ -140,7 +145,6 @@ export default function Retention() {
               <thead>
                 <tr>
                   <th style={{ textAlign: "left" }}>Клиент</th>
-                  <th style={{ textAlign: "left" }}>Телефон</th>
                   <th style={{ textAlign: "left" }}>Абонемент</th>
                   <th>Окончание</th>
                   <th>Последний визит</th>
@@ -150,8 +154,7 @@ export default function Retention() {
               <tbody>
                 {data.atRisk.map((r, i) => (
                   <tr key={i}>
-                    <td style={{ textAlign: "left" }}>{dstr(r.name)}</td>
-                    <td style={{ textAlign: "left" }}>{phoneLink(r.phone)}</td>
+                    <td style={{ textAlign: "left" }}>{clientLink(r.name, r.client_id)}</td>
                     <td style={{ textAlign: "left" }}>{dstr(r.tariff)}</td>
                     <td style={{ textAlign: "center" }}>{dstr(r.end_d)}</td>
                     <td style={{ textAlign: "center" }}>{r.last_visit_d ? String(r.last_visit_d) : "не был(а)"}</td>
@@ -162,7 +165,7 @@ export default function Retention() {
                 ))}
                 {data.atRisk.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="muted" style={{ textAlign: "center" }}>Все активные клиенты ходят</td>
+                    <td colSpan={5} className="muted" style={{ textAlign: "center" }}>Все активные клиенты ходят</td>
                   </tr>
                 )}
               </tbody>
