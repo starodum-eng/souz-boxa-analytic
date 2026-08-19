@@ -1,16 +1,18 @@
 :root {
-  /* Тёплая тёмная тема в стиле сайта клуба + фирменный красный */
-  --bg: #15110e;
-  --panel: #201a16;
-  --panel-2: #2a2019;
-  --border: #38302a;
-  --text: #f3ede8;
-  --muted: #a8998c;
+  /* Светлая тема (Roistat-стиль) + фирменный красный Союз Бокса как акцент */
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #f0f2f5;
+  --border: #e3e7ec;
+  --text: #1f2733;
+  --muted: #7a8698;
   --accent: #e0271b;
   --accent-2: #b71d13;
   --gold: #e0a53b;
-  --green: #46c07a;
-  --red: #ff6a5a;
+  --green: #1aa053;
+  --red: #e0271b;
+  --link: #2b7fd4; /* синие цифры-ссылки как в Roistat */
+  --bar: #dbe7f4; /* фон мини-баров конверсии */
 }
 
 * {
@@ -22,9 +24,6 @@ body {
   margin: 0;
   padding: 0;
   background-color: var(--bg);
-  /* тонкая точечная текстура как на сайте */
-  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 22px 22px;
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -38,20 +37,21 @@ body {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 28px 20px 60px;
+  padding: 24px 20px 60px;
 }
 
 .topbar {
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, #241c17 0%, var(--panel) 100%);
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(17, 24, 39, 0.04);
   position: sticky;
   top: 0;
   z-index: 10;
 }
 .topbar-inner {
-  max-width: 1200px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 0 20px;
   display: flex;
@@ -63,20 +63,20 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 0;
+  padding: 12px 0;
 }
 .brand-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   font-weight: 800;
-  font-size: 18px;
-  box-shadow: 0 4px 14px rgba(224, 39, 27, 0.35);
+  font-size: 17px;
+  box-shadow: 0 4px 12px rgba(224, 39, 27, 0.25);
 }
 .brand-name {
   font-weight: 800;
@@ -112,7 +112,7 @@ body {
   color: var(--text);
 }
 .tab.active {
-  color: var(--text);
+  color: var(--accent);
   border-bottom-color: var(--accent);
 }
 
@@ -120,22 +120,22 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: -8px 0 20px;
+  margin: -4px 0 18px;
   font-size: 13px;
   flex-wrap: wrap;
 }
 .daterange input[type="date"] {
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   padding: 6px 10px;
   font-size: 13px;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .src-input {
-  background: var(--panel-2);
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
@@ -170,7 +170,7 @@ body {
 }
 .src-hide:hover {
   color: var(--red);
-  border-color: rgba(255, 89, 100, 0.3);
+  border-color: rgba(224, 39, 27, 0.3);
 }
 
 .header {
@@ -178,36 +178,67 @@ body {
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 18px;
   flex-wrap: wrap;
 }
-
 .header h1 {
-  font-size: 26px;
+  font-size: 24px;
   margin: 0;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
-
 .header .sub {
   color: var(--muted);
   font-size: 13px;
   margin-top: 4px;
 }
 
+/* ── Компактная стат-полоса (вместо крупных KPI-карточек) ── */
+.statbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.statbar .stat {
+  padding: 12px 18px;
+  border-right: 1px solid var(--border);
+  min-width: 130px;
+  flex: 1 1 auto;
+}
+.statbar .stat:last-child {
+  border-right: none;
+}
+.stat .s-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat .s-value {
+  font-size: 20px;
+  font-weight: 800;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 12px;
+  padding: 16px;
 }
 
 .kpi {
@@ -229,12 +260,12 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-
 .kpi .value {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 800;
   margin-top: 8px;
   letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
 }
 
 .section-title {
@@ -243,27 +274,25 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text);
-  margin: 28px 0 12px;
+  margin: 26px 0 12px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
-
 th,
 td {
   text-align: right;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
 }
-
 th:first-child,
 td:first-child {
   text-align: left;
 }
-
 tbody tr:last-child td {
   border-bottom: none;
 }
@@ -272,7 +301,112 @@ tfoot .total-row td {
   border-bottom: none;
   font-weight: 700;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--panel-2);
+}
+tbody tr:hover td {
+  background: rgba(43, 127, 212, 0.05);
+}
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+td:first-child {
+  font-weight: 600;
+}
+
+/* ── Плотный отчёт по каналам (Roistat) ── */
+.report-wrap {
+  overflow-x: auto;
+}
+table.report th,
+table.report td {
+  padding: 7px 10px;
+}
+table.report thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 2;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+table.report thead th:hover {
+  color: var(--text);
+}
+table.report tr.total-top td {
+  background: var(--panel-2);
+  font-weight: 700;
+  border-bottom: 2px solid var(--border);
+}
+table.report tbody tr {
+  height: 34px;
+}
+.num-link {
+  color: var(--link);
+  border-bottom: 1px dotted var(--link);
+  cursor: pointer;
+}
+.expand-btn {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  margin-right: 8px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.expand-btn:hover {
+  border-color: var(--link);
+  color: var(--link);
+}
+.minibar {
+  position: relative;
+  display: inline-block;
+  width: 78px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--bar);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.minibar .fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--link);
+  opacity: 0.55;
+}
+.minibar .pctval {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 5px;
+  font-size: 11px;
+  color: var(--text);
+  font-weight: 600;
+}
+.campaign-row td {
+  background: var(--panel-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+.campaign-row td:first-child {
+  padding-left: 34px;
+  font-weight: 500;
+  color: var(--text);
 }
 
 /* Двублочная таблица «По дням»: маркетинг слева, Fitbase справа */
@@ -287,31 +421,17 @@ tfoot .total-row td {
 }
 .split-table .grp-fb {
   color: var(--gold);
-  border-bottom: 2px solid rgba(224, 165, 59, 0.35);
+  border-bottom: 2px solid rgba(224, 165, 59, 0.45);
 }
 .split-table .col-fb {
-  background: rgba(224, 165, 59, 0.06);
+  background: rgba(224, 165, 59, 0.08);
 }
 .split-table th.col-fb {
-  color: var(--gold);
+  color: #a9781f;
 }
 .split-table td.col-fb:first-of-type,
 .split-table th.col-fb:first-of-type {
   border-left: 1px solid var(--border);
-}
-tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-th {
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-td:first-child {
-  font-weight: 600;
 }
 
 .pos {
@@ -341,17 +461,68 @@ td.msg {
 }
 .badge.ok {
   color: var(--green);
-  border-color: rgba(70, 192, 122, 0.35);
-  background: rgba(70, 192, 122, 0.08);
+  border-color: rgba(26, 160, 83, 0.35);
+  background: rgba(26, 160, 83, 0.08);
 }
 .badge.error {
   color: var(--red);
-  border-color: rgba(255, 106, 90, 0.35);
-  background: rgba(255, 106, 90, 0.08);
+  border-color: rgba(224, 39, 27, 0.35);
+  background: rgba(224, 39, 27, 0.08);
 }
 
+/* ── График + метрик-пикер ── */
+.chart-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.chart-main {
+  flex: 1 1 560px;
+  min-width: 0;
+}
 .chart-wrap {
-  height: 320px;
+  height: 340px;
+}
+.metric-picker {
+  flex: 0 0 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metric-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.metric-chip:hover {
+  border-color: var(--muted);
+}
+.metric-chip.on {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--panel-2);
+}
+.metric-chip .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.compare-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-top: 8px;
 }
 
 .controls {
@@ -360,9 +531,8 @@ td.msg {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-
 .controls button {
-  background: var(--panel-2);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -376,8 +546,9 @@ td.msg {
 }
 .controls button.active {
   border-color: var(--accent);
-  background: rgba(224, 39, 27, 0.12);
-  color: #fff;
+  background: rgba(224, 39, 27, 0.08);
+  color: var(--accent);
+  font-weight: 600;
 }
 .controls button.sync-btn {
   background: var(--accent);

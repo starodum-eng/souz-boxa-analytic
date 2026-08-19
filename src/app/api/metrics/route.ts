@@ -51,6 +51,7 @@ export async function GET(req: Request) {
     SELECT
       source,
       COALESCE(SUM(cost), 0)        AS cost,
+      COALESCE(SUM(visits), 0)      AS visits,
       COALESCE(SUM(leads), 0)       AS leads,
       COALESCE(SUM(sales_count), 0) AS sales_count,
       COALESCE(SUM(revenue), 0)     AS revenue,
@@ -263,37 +264,82 @@ export async function GET(req: Request) {
     ORDER BY d.date DESC
   `);
 
-  // Непрерывный дневной ряд: расход/лиды из витрины, выручка — из журнала продаж
-  // (sales_ledger), как в byDate. Из daily_metrics выручку брать нельзя: витрина
-  // её не заполняет (там revenue=0), поэтому линия «Выручка» и лежала в нуле.
-  const timeline = await db.execute(sql`
-    WITH days AS (
-      SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS date
-    ),
-    dm AS (
-      SELECT date, SUM(cost) AS cost, SUM(leads) AS leads
-      FROM daily_metrics
-      WHERE date >= ${from} AND date <= ${to}
-      GROUP BY date
-    ),
-    rev AS (
-      SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date,
-             SUM(amount) AS revenue
-      FROM sales_ledger
-      WHERE pay_date IS NOT NULL
-        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
-        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
-      GROUP BY 1
-    )
+  // Непрерывный дневной ряд с полным набором полей (для метрик-пикера графика):
+  // visits/cost/leads из витрины, revenue из sales_ledger, clients из clients,
+  // paying — новые клиенты дня с оплатой. Дни без данных = 0 (generate_series).
+  const buildTimeline = (f: string, t2: string) =>
+    db.execute(sql`
+      WITH days AS (
+        SELECT generate_series(${f}::date, ${t2}::date, interval '1 day')::date AS date
+      ),
+      dm AS (
+        SELECT date, SUM(cost) AS cost, SUM(leads) AS leads, SUM(visits) AS visits
+        FROM daily_metrics WHERE date >= ${f} AND date <= ${t2} GROUP BY date
+      ),
+      rev AS (
+        SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date, SUM(amount) AS revenue
+        FROM sales_ledger
+        WHERE pay_date IS NOT NULL
+          AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${f}
+          AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${t2}
+        GROUP BY 1
+      ),
+      cl AS (
+        SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS clients
+        FROM clients
+        WHERE created_at IS NOT NULL
+          AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${f}
+          AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${t2}
+        GROUP BY 1
+      ),
+      pay AS (
+        SELECT (c.created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS paying
+        FROM clients c
+        WHERE c.created_at IS NOT NULL
+          AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${f}
+          AND (c.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${t2}
+          AND EXISTS (SELECT 1 FROM sales_ledger s WHERE s.client_id = c.fitbase_id AND s.amount > 0)
+        GROUP BY 1
+      )
+      SELECT
+        d.date,
+        COALESCE(dm.visits, 0)   AS visits,
+        COALESCE(dm.cost, 0)     AS cost,
+        COALESCE(dm.leads, 0)    AS leads,
+        COALESCE(rev.revenue, 0) AS revenue,
+        COALESCE(cl.clients, 0)  AS clients,
+        COALESCE(pay.paying, 0)  AS paying
+      FROM days d
+      LEFT JOIN dm  ON dm.date  = d.date
+      LEFT JOIN rev ON rev.date = d.date
+      LEFT JOIN cl  ON cl.date  = d.date
+      LEFT JOIN pay ON pay.date = d.date
+      ORDER BY d.date
+    `);
+
+  const timeline = await buildTimeline(from, to);
+  // Сравнение с прошлым периодом той же длины (?compare=1), выровнено по дню 1..N.
+  const compare = url.searchParams.get("compare") === "1";
+  const timelinePrev = compare ? await buildTimeline(prevFrom, prevTo) : null;
+
+  // Кампании платных источников (для раскрытия строки канала). Funnel по кампании
+  // не считаем — только расход/клики/показы (нет атрибуции на уровне кампании).
+  const campaignsBySource = await db.execute(sql`
     SELECT
-      d.date,
-      COALESCE(dm.cost, 0)     AS cost,
-      COALESCE(dm.leads, 0)    AS leads,
-      COALESCE(rev.revenue, 0) AS revenue
-    FROM days d
-    LEFT JOIN dm  ON dm.date  = d.date
-    LEFT JOIN rev ON rev.date = d.date
-    ORDER BY d.date
+      CASE source
+        WHEN 'yandex_direct' THEN 'Яндекс.Директ'
+        WHEN 'vk_ads' THEN 'VK Реклама'
+        ELSE source::text
+      END AS source,
+      COALESCE(campaign_name, '—') AS campaign_name,
+      COALESCE(SUM(cost), 0)        AS cost,
+      COALESCE(SUM(clicks), 0)      AS clicks,
+      COALESCE(SUM(impressions), 0) AS impressions
+    FROM ad_spend
+    WHERE date >= ${from} AND date <= ${to}
+    GROUP BY 1, 2
+    HAVING SUM(cost) > 0 OR SUM(clicks) > 0 OR SUM(impressions) > 0
+    ORDER BY 1, cost DESC
   `);
 
   // Новые клиенты Fitbase за период (CRM-конверсия, нижняя ступень воронки).
@@ -433,6 +479,7 @@ export async function GET(req: Request) {
       source,
       cost,
       clicks: Number(ad?.clicks ?? 0),
+      visits: Number(ad?.visits ?? 0),
       leads,
       clients: cr.clients,
       paying: cr.paying,
@@ -469,6 +516,7 @@ export async function GET(req: Request) {
         source: "Не определён",
         cost: 0,
         clicks: 0,
+        visits: 0,
         leads: 0,
         clients: 0,
         paying: 0,
@@ -515,10 +563,12 @@ export async function GET(req: Request) {
       revenue: Number(prevRevenue.rows[0]?.revenue ?? 0),
     },
     bySource: bySourceMerged,
+    campaignsBySource: campaignsBySource.rows,
     channelInfluence: channelInfluence.rows,
     lifetimeByChannel: lifetimeByChannel.rows,
     byDate: byDate.rows,
     timeline: timeline.rows,
+    timelinePrev: timelinePrev?.rows ?? null,
     lastSync: lastSync.rows,
   });
 }
