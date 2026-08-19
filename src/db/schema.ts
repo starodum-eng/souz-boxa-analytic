@@ -291,6 +291,22 @@ export const dailyMetrics = pgTable(
 );
 
 /**
+ * Плановые KPI по месяцам (ручной ввод во вкладке «Цели»).
+ * Одна строка = цель по метрике на месяц. Факт считается из данных на лету.
+ */
+export const kpiTargets = pgTable(
+  "kpi_targets",
+  {
+    id: serial("id").primaryKey(),
+    month: varchar("month", { length: 7 }).notNull(), // 'YYYY-MM'
+    metric: varchar("metric", { length: 32 }).notNull(),
+    target: numeric("target", { precision: 14, scale: 2 }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("kpi_targets_uniq").on(t.month, t.metric)],
+);
+
+/**
  * Кэш OAuth-токенов интеграций (одна строка на провайдера).
  * Нужен, чтобы не плодить токены при каждом синке (у VK Ads лимит 5 токенов
  * на client_id): держим один активный, обновляем по refresh_token.

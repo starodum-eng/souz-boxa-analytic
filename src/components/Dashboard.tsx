@@ -192,7 +192,26 @@ function computeMetrics(d: TimePoint) {
   };
 }
 
-export default function Dashboard() {
+interface PfRow {
+  key: string;
+  label: string;
+  unit: "шт" | "₽" | "%";
+  dir: "up" | "down";
+  type: "flow" | "eff";
+  fact: number | null;
+  target: number | null;
+  forecast: number | null;
+  pct: number | null;
+  status: "green" | "yellow" | "red" | "none";
+}
+interface PlanFact {
+  month: string;
+  daysElapsed: number;
+  daysInMonth: number;
+  rows: PfRow[];
+}
+
+export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } = {}) {
   const initial = presetRange("30d");
   const [preset, setPreset] = useState<PresetKey | "custom">("30d");
   const [from, setFrom] = useState<string>(initial.from);
@@ -206,6 +225,15 @@ export default function Dashboard() {
   const [sortKey, setSortKey] = useState<string>("revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pf, setPf] = useState<PlanFact | null>(null);
+
+  // План/факт — по ТЕКУЩЕМУ месяцу, независимо от верхнего фильтра периода.
+  useEffect(() => {
+    fetch("/api/plan-fact")
+      .then((r) => r.json())
+      .then(setPf)
+      .catch(() => {});
+  }, []);
 
   function applyPreset(key: PresetKey) {
     const r = presetRange(key);
@@ -420,6 +448,72 @@ export default function Dashboard() {
             />
             <Stat label="LTV/CAC" value={ltvCacStr(t)} cls={ltvCacCls(t)} />
           </div>
+
+          {/* ── План / факт (текущий месяц) ── */}
+          {pf &&
+            (() => {
+              const [yy, mm] = pf.month.split("-").map(Number);
+              const monthLabel = new Date(yy, mm - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+              const hasAny = pf.rows.some((r) => r.target != null);
+              const fmt = (unit: string, v: number | null) =>
+                v == null ? "—" : unit === "₽" ? rub(v) : unit === "%" ? `${Math.round(v)}%` : num(v);
+              const dot = (s: string) =>
+                s === "green" ? "var(--green)" : s === "yellow" ? "var(--gold)" : s === "red" ? "var(--red)" : "var(--muted)";
+              return (
+                <>
+                  <div className="section-title" style={{ marginTop: 6 }}>
+                    План / факт · {monthLabel} · текущий месяц (не зависит от фильтра периода)
+                  </div>
+                  {!hasAny ? (
+                    <div className="card muted">
+                      Цели на месяц не заданы.{" "}
+                      <span
+                        onClick={onGoTargets}
+                        style={{ color: "var(--link)", cursor: "pointer", borderBottom: "1px dotted var(--link)" }}
+                      >
+                        Задайте цели во вкладке «Цели»
+                      </span>
+                      .
+                    </div>
+                  ) : (
+                    <div className="card" style={{ padding: 0 }}>
+                      <div className="report-wrap">
+                        <table className="report">
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: "left", width: 22 }}></th>
+                              <th style={{ textAlign: "left" }}>Метрика</th>
+                              <th>Факт (с начала месяца)</th>
+                              <th>План</th>
+                              <th>Прогноз</th>
+                              <th>% выполнения</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pf.rows.map((r) => (
+                              <tr key={r.key}>
+                                <td>
+                                  <span
+                                    style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: dot(r.status) }}
+                                  />
+                                </td>
+                                <td style={{ textAlign: "left" }}>{r.label}</td>
+                                <td>{fmt(r.unit, r.fact)}</td>
+                                <td>{r.target != null ? fmt(r.unit, r.target) : "—"}</td>
+                                <td>{r.type === "flow" && r.forecast != null ? fmt(r.unit, r.forecast) : "—"}</td>
+                                <td className={r.status === "green" ? "pos" : r.status === "red" ? "neg" : ""}>
+                                  {r.pct != null ? pct(r.pct) : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
           {/* ── График + метрик-пикер ── */}
           <div className="section-title" style={{ marginTop: 6 }}>Динамика</div>
