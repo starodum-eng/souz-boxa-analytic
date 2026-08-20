@@ -7,6 +7,7 @@ import {
   date,
   timestamp,
   integer,
+  bigint,
   numeric,
   jsonb,
   uniqueIndex,
@@ -329,6 +330,17 @@ export const kpiTargets = pgTable(
   },
   (t) => [uniqueIndex("kpi_targets_uniq").on(t.month, t.metric)],
 );
+
+/**
+ * Водяные знаки инкрементального синка: unix-секунды последнего УСПЕШНОГО
+ * прогона по эндпоинту (напр. 'fitbase:client'). Позволяет тянуть только
+ * изменённые с прошлого раза записи (updated_at), не перекачивая всё.
+ */
+export const syncState = pgTable("sync_state", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  lastUpdatedAt: bigint("last_updated_at", { mode: "number" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Кэш OAuth-токенов интеграций (одна строка на провайдера).

@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { lastNDays, type SourceKey } from "@/integrations/types";
 import { fetchYandexDirectSpend } from "@/integrations/yandex-direct";
@@ -14,7 +14,19 @@ import {
 import { fetchCallibri } from "@/integrations/callibri";
 import { normalizePhone } from "@/lib/phone";
 
-const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, clientPayments, clientVisits, leadTouches, dailyMetrics, syncLog } = schema;
+const { adSpend, webSessions, clients, fitbaseLeads, clientContracts, clientPayments, clientVisits, leadTouches, dailyMetrics, syncLog, syncState } = schema;
+
+/** Водяной знак (unix-сек) последнего успешного синка эндпоинта. */
+async function getWatermark(key: string): Promise<number | null> {
+  const rows = await db.select().from(syncState).where(eq(syncState.key, key)).limit(1);
+  return rows[0]?.lastUpdatedAt ?? null;
+}
+async function setWatermark(key: string, unix: number): Promise<void> {
+  await db
+    .insert(syncState)
+    .values({ key, lastUpdatedAt: unix, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: syncState.key, set: { lastUpdatedAt: unix, updatedAt: new Date() } });
+}
 
 export interface SyncResult {
   source: SourceKey;
@@ -31,6 +43,14 @@ export async function runFullSync(): Promise<SyncResult[]> {
   const results: SyncResult[] = [];
 
   const CHUNK = 500;
+
+  // Инкрементальный синк: тянем только изменённые с прошлого успешного прогона.
+  const syncStartUnix = Math.floor(Date.now() / 1000);
+  const OVERLAP = (Number(process.env.FITBASE_SYNC_OVERLAP_HOURS) || 48) * 3600; // запас на поздние правки
+  const sinceFor = async (key: string): Promise<number> => {
+    const wm = await getWatermark(key);
+    return wm ? Math.max(0, wm - OVERLAP) : 0; // 0 = первый прогон → полный бэкфилл
+  };
 
   const syncAdSpend = (src: "yandex_direct" | "vk_ads", fetcher: typeof fetchYandexDirectSpend) =>
     guarded(src, async () => {
@@ -117,12 +137,13 @@ export async function runFullSync(): Promise<SyncResult[]> {
     };
     // Эндпоинты Fitbase — последовательно (внутри каждого пагинация по 3 стр.
     // параллельно + повтор при 429), чтобы суммарно не превышать лимит частоты.
-    const clientsRaw = await fetchFitbaseClients(range);
+    const clientsSince = await sinceFor("fitbase:client");
+    const contractsSince = await sinceFor("fitbase:client-contract");
+    const clientsRaw = await fetchFitbaseClients(range, clientsSince);
     const leadsRaw = await fetchFitbaseLeads(range);
-    const contractsRaw = await fetchFitbaseContracts(range);
+    const contractsRaw = await fetchFitbaseContracts(range, contractsSince);
     const visitsRaw = await fetchFitbaseVisits(range);
     const contractRowsAll = dedupe(contractsRaw.filter((c) => c.fitbaseId));
-    const paymentsRaw = await fetchFitbasePayments(contractRowsAll);
 
     const clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
     // Пакетная вставка чанками (neon-http делает HTTP-запрос на каждый вызов).
@@ -141,6 +162,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
           },
         });
     }
+    await setWatermark("fitbase:client", syncStartUnix);
 
     // Лиды воронки (атрибуция канала + этап). fetchFitbaseLeads возвращает ПОЛНЫЙ
     // набор нужной воронки за раз, поэтому делаем полное обновление таблицы:
@@ -196,6 +218,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
           },
         });
     }
+    await setWatermark("fitbase:client-contract", syncStartUnix);
 
     // Визиты (посещаемость).
     const visitRows = dedupe(visitsRaw.filter((v) => v.fitbaseId));
@@ -214,36 +237,50 @@ export async function runFullSync(): Promise<SyncResult[]> {
         });
     }
 
-    // Единая касса: абонементы + услуги + товары.
-    const payMap = new Map<string, (typeof paymentsRaw)[number]>();
-    for (const p of paymentsRaw) if (p.extId) payMap.set(p.extId, p);
-    const payRows = [...payMap.values()];
-    for (let i = 0; i < payRows.length; i += CHUNK) {
-      const batch = payRows.slice(i, i + CHUNK).map((p) => ({
-        extId: p.extId,
-        kind: p.kind,
-        clientId: p.clientId,
-        amount: String(p.amount),
-        paid: p.paid ? 1 : 0,
-        payDate: p.payDate,
-        raw: p.raw,
-      }));
-      await db
-        .insert(clientPayments)
-        .values(batch)
-        .onConflictDoUpdate({
-          target: [clientPayments.extId],
-          set: {
-            clientId: sql`excluded.client_id`,
-            amount: sql`excluded.amount`,
-            paid: sql`excluded.paid`,
-            payDate: sql`excluded.pay_date`,
-            updatedAt: new Date(),
-          },
-        });
+    // Единая касса (абонементы + услуги + товары) — НЕКРИТИЧНЫЙ подшаг: его сбой
+    // (502/недоступность услуг/товаров) не роняет уже сохранённые клиентов/лидов/
+    // контракты/визиты. Выручка дашборда берётся из sales_ledger, client_payments вторичны.
+    let payCount = 0;
+    try {
+      const svcSince = await sinceFor("fitbase:client-service");
+      const prodSince = await sinceFor("fitbase:client-product");
+      const pay = await fetchFitbasePayments(contractRowsAll, svcSince, prodSince);
+      const payMap = new Map<string, (typeof pay.rows)[number]>();
+      for (const p of pay.rows) if (p.extId) payMap.set(p.extId, p);
+      const payRows = [...payMap.values()];
+      for (let i = 0; i < payRows.length; i += CHUNK) {
+        const batch = payRows.slice(i, i + CHUNK).map((p) => ({
+          extId: p.extId,
+          kind: p.kind,
+          clientId: p.clientId,
+          amount: String(p.amount),
+          paid: p.paid ? 1 : 0,
+          payDate: p.payDate,
+          raw: p.raw,
+        }));
+        await db
+          .insert(clientPayments)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [clientPayments.extId],
+            set: {
+              clientId: sql`excluded.client_id`,
+              amount: sql`excluded.amount`,
+              paid: sql`excluded.paid`,
+              payDate: sql`excluded.pay_date`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      payCount = payRows.length;
+      // Водяные знаки продвигаем только по реально загруженным эндпоинтам.
+      if (pay.servicesOk) await setWatermark("fitbase:client-service", syncStartUnix);
+      if (pay.productsOk) await setWatermark("fitbase:client-product", syncStartUnix);
+    } catch (e) {
+      console.error("Fitbase касса (услуги/товары) пропущена, ядро сохранено:", e instanceof Error ? e.message : e);
     }
 
-    return clientRows.length + leadRows.length + contractRows.length + visitRows.length + payRows.length;
+    return clientRows.length + leadRows.length + contractRows.length + visitRows.length + payCount;
   }));
 
   results.push(await guarded("callibri", async () => {

@@ -90,17 +90,19 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
   const getPage = async (page: number): Promise<Record<string, unknown>> => {
     for (let attempt = 0; attempt < 6; attempt++) {
       const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
-      if (res.status === 429) {
-        await sleep(1000 * (attempt + 1)); // лимит частоты — ждём и повторяем
+      // Транзиентные: 429 (лимит частоты) и 5xx (502/503/… — временный сбой Fitbase).
+      if (res.status === 429 || res.status >= 500) {
+        await sleep(1000 * (attempt + 1)); // 1с, 2с, … — ждём и повторяем
         continue;
       }
+      // 4xx — наши ошибки (доступ/параметры), не транзиент → падаем сразу.
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Fitbase ${endpointName} error ${res.status}: ${text.slice(0, 300)}`);
       }
       return (await res.json()) as Record<string, unknown>;
     }
-    throw new Error(`Fitbase ${endpointName}: превышен лимит запросов (429) после повторов`);
+    throw new Error(`Fitbase ${endpointName}: не удалось получить ответ после повторов (429/5xx)`);
   };
 
   const first = await getPage(1);
@@ -132,8 +134,15 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
   return out;
 }
 
-export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[]> {
-  const items = await fetchAllPages("/client", "/client");
+/** Добавить ?updated_at=<unix> к пути (инкрементальный синк). since<=0 → полный пул. */
+function withUpdated(path: string, since?: number): string {
+  if (!since || since <= 0) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}updated_at=${since}`;
+}
+
+export async function fetchFitbaseClients(_range: DateRange, updatedSince?: number): Promise<ClientRow[]> {
+  const items = await fetchAllPages(withUpdated("/client", updatedSince), "/client");
   return items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     name: fullName(c),
@@ -193,8 +202,8 @@ export async function fetchFitbaseVisits(range: DateRange): Promise<FitbaseVisit
 }
 
 /** Абонементы (/v2/client-contract) — суммы оплат = LTV. */
-export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseContractRow[]> {
-  const items = await fetchAllPages("/client-contract", "/client-contract");
+export async function fetchFitbaseContracts(_range: DateRange, updatedSince?: number): Promise<FitbaseContractRow[]> {
+  const items = await fetchAllPages(withUpdated("/client-contract", updatedSince), "/client-contract");
   return items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     clientId: c.client_id != null ? String(c.client_id) : null,
@@ -212,10 +221,30 @@ export async function fetchFitbaseContracts(_range: DateRange): Promise<FitbaseC
 /**
  * Единая касса: абонементы (уже загруженные) + услуги + товары.
  * Абонементы передаём готовыми, чтобы не тянуть их дважды.
+ * Услуги/товары — best-effort: их сбой (502/…) не роняет кассу, возвращаем флаги
+ * успеха, чтобы ETL продвигал водяной знак только по реально загруженному.
  */
-export async function fetchFitbasePayments(contracts: FitbaseContractRow[]): Promise<FitbasePaymentRow[]> {
-  const services = await fetchAllPages("/client-service", "/client-service");
-  const products = await fetchAllPages("/client-product", "/client-product");
+export async function fetchFitbasePayments(
+  contracts: FitbaseContractRow[],
+  servicesSince?: number,
+  productsSince?: number,
+): Promise<{ rows: FitbasePaymentRow[]; servicesOk: boolean; productsOk: boolean }> {
+  let services: any[] = [];
+  let products: any[] = [];
+  let servicesOk = false;
+  let productsOk = false;
+  try {
+    services = await fetchAllPages(withUpdated("/client-service", servicesSince), "/client-service");
+    servicesOk = true;
+  } catch (e) {
+    console.error("Fitbase /client-service недоступен, пропускаю услуги:", e instanceof Error ? e.message : e);
+  }
+  try {
+    products = await fetchAllPages(withUpdated("/client-product", productsSince), "/client-product");
+    productsOk = true;
+  } catch (e) {
+    console.error("Fitbase /client-product недоступен, пропускаю товары:", e instanceof Error ? e.message : e);
+  }
 
   const out: FitbasePaymentRow[] = [];
 
@@ -258,5 +287,5 @@ export async function fetchFitbasePayments(contracts: FitbaseContractRow[]): Pro
     });
   }
 
-  return out;
+  return { rows: out, servicesOk, productsOk };
 }
