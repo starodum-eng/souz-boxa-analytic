@@ -88,11 +88,11 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
   const headers = authHeaders();
   const sep = path.includes("?") ? "&" : "?";
   const getPage = async (page: number): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
       // Транзиентные: 429 (лимит частоты) и 5xx (502/503/… — временный сбой Fitbase).
       if (res.status === 429 || res.status >= 500) {
-        await sleep(1000 * (attempt + 1)); // 1с, 2с, … — ждём и повторяем
+        await sleep(Math.min(1000 * (attempt + 1), 5000)); // backoff до 5с, 8 попыток
         continue;
       }
       // 4xx — наши ошибки (доступ/параметры), не транзиент → падаем сразу.
