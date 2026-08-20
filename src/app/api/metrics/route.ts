@@ -211,10 +211,18 @@ export async function GET(req: Request) {
   // правая — Fitbase (продажи/выручка по дате платежа + посещения).
   const byDate = await db.execute(sql`
     WITH dm AS (
-      SELECT date, SUM(cost) AS cost, SUM(leads) AS leads
+      SELECT date, SUM(cost) AS cost
       FROM daily_metrics
       WHERE date >= ${from} AND date <= ${to}
       GROUP BY date
+    ),
+    fl AS (
+      SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS leads
+      FROM fitbase_leads
+      WHERE created_at IS NOT NULL
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY 1
     ),
     cl AS (
       SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS clients
@@ -243,6 +251,7 @@ export async function GET(req: Request) {
     ),
     dates AS (
       SELECT date FROM dm
+      UNION SELECT date FROM fl
       UNION SELECT date FROM cl
       UNION SELECT date FROM sales
       UNION SELECT date FROM vis
@@ -250,14 +259,15 @@ export async function GET(req: Request) {
     SELECT
       d.date,
       COALESCE(dm.cost, 0)           AS cost,
-      COALESCE(dm.leads, 0)          AS leads,
-      CASE WHEN dm.leads > 0 THEN ROUND(dm.cost/dm.leads, 2) END AS cpl,
+      COALESCE(fl.leads, 0)          AS leads,
+      CASE WHEN fl.leads > 0 THEN ROUND(dm.cost/fl.leads, 2) END AS cpl,
       COALESCE(cl.clients, 0)        AS clients,
       COALESCE(sales.sales_count, 0) AS sales_count,
       COALESCE(sales.revenue, 0)     AS revenue,
       COALESCE(vis.visits, 0)        AS visits
     FROM dates d
     LEFT JOIN dm    ON dm.date    = d.date
+    LEFT JOIN fl    ON fl.date    = d.date
     LEFT JOIN cl    ON cl.date    = d.date
     LEFT JOIN sales ON sales.date = d.date
     LEFT JOIN vis   ON vis.date   = d.date
@@ -273,8 +283,16 @@ export async function GET(req: Request) {
         SELECT generate_series(${f}::date, ${t2}::date, interval '1 day')::date AS date
       ),
       dm AS (
-        SELECT date, SUM(cost) AS cost, SUM(leads) AS leads, SUM(visits) AS visits
+        SELECT date, SUM(cost) AS cost, SUM(visits) AS visits
         FROM daily_metrics WHERE date >= ${f} AND date <= ${t2} GROUP BY date
+      ),
+      fl AS (
+        SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS date, COUNT(*) AS leads
+        FROM fitbase_leads
+        WHERE created_at IS NOT NULL
+          AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${f}
+          AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${t2}
+        GROUP BY 1
       ),
       rev AS (
         SELECT (pay_date AT TIME ZONE 'Europe/Moscow')::date AS date, SUM(amount) AS revenue
@@ -305,12 +323,13 @@ export async function GET(req: Request) {
         d.date,
         COALESCE(dm.visits, 0)   AS visits,
         COALESCE(dm.cost, 0)     AS cost,
-        COALESCE(dm.leads, 0)    AS leads,
+        COALESCE(fl.leads, 0)    AS leads,
         COALESCE(rev.revenue, 0) AS revenue,
         COALESCE(cl.clients, 0)  AS clients,
         COALESCE(pay.paying, 0)  AS paying
       FROM days d
       LEFT JOIN dm  ON dm.date  = d.date
+      LEFT JOIN fl  ON fl.date  = d.date
       LEFT JOIN rev ON rev.date = d.date
       LEFT JOIN cl  ON cl.date  = d.date
       LEFT JOIN pay ON pay.date = d.date
@@ -363,9 +382,42 @@ export async function GET(req: Request) {
       )
   `);
 
+  // ЛИДЫ = заявки Fitbase (воронка «Новые лиды», в таблице только она) по дате
+  // создания, с разбивкой по каналу (utm/advertising_source → человекочитаемый канал).
+  const leadsByChannelRows = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN coalesce(m.label,'') <> '' THEN m.label
+        WHEN lower(coalesce(fl.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(fl.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'
+        WHEN lower(coalesce(fl.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
+        WHEN lower(coalesce(fl.advertising_source,'')) LIKE '%вконтакте%' THEN 'VK Реклама'
+        WHEN coalesce(fl.advertising_source,'') <> '' THEN fl.advertising_source
+        ELSE 'Не определён'
+      END AS source,
+      COUNT(*)::int AS leads
+    FROM fitbase_leads fl
+    LEFT JOIN source_mappings m ON coalesce(fl.utm_source,'') <> '' AND m.utm_source = lower(fl.utm_source)
+    WHERE fl.created_at IS NOT NULL
+      AND (fl.created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (fl.created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+    GROUP BY 1
+  `);
+  const leadsByChannel = new Map<string, number>(
+    leadsByChannelRows.rows.map((r) => [String(r.source), Number(r.leads)]),
+  );
+  const leadsTotal = [...leadsByChannel.values()].reduce((a, b) => a + b, 0);
+
+  const leadsPrevRow = await db.execute(sql`
+    SELECT COUNT(*)::int AS leads FROM fitbase_leads
+    WHERE created_at IS NOT NULL
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${prevFrom}
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${prevTo}
+  `);
+  const leadsPrev = Number(leadsPrevRow.rows[0]?.leads ?? 0);
+
   // Предыдущий период — те же источники, что и текущие KPI (для Δ% «яблоки к яблокам»).
   const prevAd = await db.execute(sql`
-    SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(leads),0) AS leads
+    SELECT COALESCE(SUM(cost),0) AS cost
     FROM daily_metrics WHERE date >= ${prevFrom} AND date <= ${prevTo}
   `);
   const prevClients = await db.execute(sql`
@@ -466,13 +518,14 @@ export async function GET(req: Request) {
   const adMap = new Map<string, Record<string, unknown>>(
     bySource.rows.map((r: Record<string, unknown>) => [String(r.source), r]),
   );
-  const allSources = new Set<string>([...adMap.keys(), ...crMap.keys()]);
+  const allSources = new Set<string>([...adMap.keys(), ...crMap.keys(), ...leadsByChannel.keys()]);
 
   const bySourceMerged = [...allSources].map((source) => {
     const ad = adMap.get(source);
     const cr = crMap.get(source) ?? { clients: 0, paying: 0, cohortLtv: 0, cash: 0 };
     const cost = Number(ad?.cost ?? 0);
-    const leads = Number(ad?.leads ?? 0);
+    // Лиды = заявки Fitbase по каналу (не цели Метрики).
+    const leads = leadsByChannel.get(source) ?? 0;
     // Основная выручка канала — касса за период (сходится с Fitbase). ROMI от неё.
     const revenue = cr.cash;
     return {
@@ -549,6 +602,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     totals: {
       ...(totals.rows[0] ?? {}),
+      leads: leadsTotal, // заявки Fitbase (Новые лиды), не цели Метрики
       new_clients: clientsAgg.rows[0]?.new_clients ?? 0,
       paid_new: paidNewAgg.rows[0]?.paid_new ?? 0, // новые клиенты периода с оплатой
       revenue: cashTotal, // касса за период (сходится с Fitbase)
@@ -558,7 +612,7 @@ export async function GET(req: Request) {
     },
     prevTotals: {
       cost: Number(prevAd.rows[0]?.cost ?? 0),
-      leads: Number(prevAd.rows[0]?.leads ?? 0),
+      leads: leadsPrev,
       new_clients: Number(prevClients.rows[0]?.new_clients ?? 0),
       revenue: Number(prevRevenue.rows[0]?.revenue ?? 0),
     },
