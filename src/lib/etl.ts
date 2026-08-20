@@ -143,7 +143,6 @@ export async function runFullSync(): Promise<SyncResult[]> {
     // Порядок: сперва независимые эндпоинты (лиды/контракты/визиты), затем клиенты —
     // так «тяжёлый» /client не блокирует лёгкие эндпоинты, если упадёт.
     const errors: string[] = [];
-    let clientRows: Awaited<ReturnType<typeof fetchFitbaseClients>> = [];
     let contractRowsAll: Awaited<ReturnType<typeof fetchFitbaseContracts>> = [];
     let total = 0;
 
@@ -239,12 +238,16 @@ export async function runFullSync(): Promise<SyncResult[]> {
       errors.push(`визиты: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // Клиенты (справочник имён/телефонов). Самый «тяжёлый» эндпоинт (~20k строк) —
-    // именно он упирается в лимит частоты. Идёт последним, чтобы не блокировать выше.
+    // Клиенты (справочник имён/телефонов) — НЕКРИТИЧНЫЙ, best-effort. Самый «тяжёлый»
+    // эндпоинт (~20k строк): именно он упирается в лимит частоты Fitbase. Идёт последним.
+    // Его сбой НЕ помечает синк ошибкой (в errors[] не идёт) — данные вторичны (имена для
+    // «Удержания»; атрибуция строится на лидах/касаниях). fetchFitbaseClients уже в
+    // partial-режиме: при штрафе вернёт то, что успел (complete=false). Водяной знак
+    // продвигаем ТОЛЬКО при полной выгрузке, иначе следующий синк не доберёт пропущенное.
     try {
       const clientsSince = await sinceFor("fitbase:client");
-      const clientsRaw = await fetchFitbaseClients(range, clientsSince);
-      clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
+      const { rows: clientsRaw, complete } = await fetchFitbaseClients(range, clientsSince);
+      const clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
       // Пакетная вставка чанками (neon-http делает HTTP-запрос на каждый вызов).
       for (let i = 0; i < clientRows.length; i += CHUNK) {
         const batch = clientRows.slice(i, i + CHUNK);
@@ -261,10 +264,12 @@ export async function runFullSync(): Promise<SyncResult[]> {
             },
           });
       }
-      await setWatermark("fitbase:client", syncStartUnix);
+      if (complete) await setWatermark("fitbase:client", syncStartUnix);
+      else console.warn(`Fitbase /client: частичная выгрузка (${clientRows.length} строк), водяной знак не двигаю — доберём в следующий синк`);
       total += clientRows.length;
     } catch (e) {
-      errors.push(`клиенты: ${e instanceof Error ? e.message : String(e)}`);
+      // Не роняем и не краснеем: клиенты — вторичный справочник. Просто лог.
+      console.error("Fitbase /client пропущен (ядро сохранено):", e instanceof Error ? e.message : e);
     }
 
     // Единая касса (абонементы + услуги + товары) — НЕКРИТИЧНЫЙ подшаг: его сбой

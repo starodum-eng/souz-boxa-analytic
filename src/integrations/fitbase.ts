@@ -83,16 +83,45 @@ function fullName(c: any): string | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Универсальная выгрузка эндпоинта Fitbase: умеренная параллельность + повтор при 429. */
-async function fetchAllPages(path: string, endpointName: string): Promise<any[]> {
+/** Сигнал «страница окончательно не отдалась» — для partial-режима (см. fetchAllPages). */
+class PageFailure extends Error {}
+
+interface PageOpts {
+  /** Параллельность пагинации. Для «тяжёлых» эндпоинтов (клиенты) ставим 1, чтобы не ловить 429. */
+  concurrency?: number;
+  /** Пауза между запросами, мс — сглаживает всплеск и снижает шанс лимита частоты. */
+  throttleMs?: number;
+  /** true → при окончательном сбое страницы вернуть уже собранное (complete=false), а не падать. */
+  partialOk?: boolean;
+}
+
+/**
+ * Универсальная выгрузка эндпоинта Fitbase: пагинация с повтором при 429/5xx.
+ * Возвращает { items, complete }. complete=false — выгрузка оборвалась на сбое
+ * страницы (только в partialOk-режиме): собранное отдаём, но это НЕ весь набор.
+ */
+async function fetchAllPages(
+  path: string,
+  endpointName: string,
+  opts: PageOpts = {},
+): Promise<{ items: any[]; complete: boolean }> {
+  const { concurrency = 3, throttleMs = 0, partialOk = false } = opts;
   const headers = authHeaders();
   const sep = path.includes("?") ? "&" : "?";
+  // Больше попыток и длиннее backoff (до 8с) — штраф за частоту снимается не сразу.
   const getPage = async (page: number): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
+    for (let attempt = 0; attempt < 10; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(`${baseUrl()}${path}${sep}page=${page}&page_size=${PAGE_SIZE}`, { headers });
+      } catch {
+        // Сетевой сбой (обрыв соединения) — тоже транзиент, повторяем.
+        await sleep(Math.min(1500 * (attempt + 1), 8000));
+        continue;
+      }
       // Транзиентные: 429 (лимит частоты) и 5xx (502/503/… — временный сбой Fitbase).
       if (res.status === 429 || res.status >= 500) {
-        await sleep(Math.min(1000 * (attempt + 1), 5000)); // backoff до 5с, 8 попыток
+        await sleep(Math.min(1500 * (attempt + 1), 8000)); // backoff до 8с, 10 попыток
         continue;
       }
       // 4xx — наши ошибки (доступ/параметры), не транзиент → падаем сразу.
@@ -102,7 +131,9 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
       }
       return (await res.json()) as Record<string, unknown>;
     }
-    throw new Error(`Fitbase ${endpointName}: не удалось получить ответ после повторов (429/5xx)`);
+    // Исчерпали повторы. В partial-режиме сигналим отдельным классом, чтобы вызвавший
+    // цикл вернул уже собранные страницы, а не потерял всю выгрузку.
+    throw new PageFailure(`Fitbase ${endpointName}: не удалось получить ответ после повторов (429/5xx)`);
   };
 
   const first = await getPage(1);
@@ -113,25 +144,32 @@ async function fetchAllPages(path: string, endpointName: string): Promise<any[]>
   // свежие записи. Поэтому НЕ используем его как условие остановки (иначе
   // теряется последняя страница с новейшими платежами/продлениями).
   // Останавливаемся, только когда страница пришла НЕПОЛНОЙ — значит данные кончились.
-  if (firstItems.length < PAGE_SIZE) return out;
+  if (firstItems.length < PAGE_SIZE) return { items: out, complete: true };
 
-  // Страницы грузим небольшими параллельными пачками (чтобы не ловить 429),
-  // продолжая, пока не встретим неполную страницу.
-  const CONCURRENCY = 3;
   let page = 2;
   let done = false;
   while (!done && page <= MAX_PAGES) {
     const batch = [];
-    for (let p = page; p < page + CONCURRENCY && p <= MAX_PAGES; p++) batch.push(getPage(p));
-    const results = await Promise.all(batch);
-    for (const json of results) {
-      const items = extractItems(json);
-      out.push(...items);
-      if (items.length < PAGE_SIZE) done = true; // дошли до конца выгрузки
+    for (let p = page; p < page + concurrency && p <= MAX_PAGES; p++) batch.push(getPage(p));
+    try {
+      const results = await Promise.all(batch);
+      for (const json of results) {
+        const items = extractItems(json);
+        out.push(...items);
+        if (items.length < PAGE_SIZE) done = true; // дошли до конца выгрузки
+      }
+    } catch (e) {
+      // Страница окончательно не отдалась. В partial-режиме не роняем всю выгрузку —
+      // отдаём собранное как неполное (следующий синк доберёт: upsert идемпотентен).
+      if (partialOk && e instanceof PageFailure) {
+        return { items: out, complete: false };
+      }
+      throw e;
     }
     page += batch.length;
+    if (throttleMs && !done) await sleep(throttleMs);
   }
-  return out;
+  return { items: out, complete: true };
 }
 
 /** Добавить ?updated_at=<unix> к пути (инкрементальный синк). since<=0 → полный пул. */
@@ -141,9 +179,24 @@ function withUpdated(path: string, since?: number): string {
   return `${path}${sep}updated_at=${since}`;
 }
 
-export async function fetchFitbaseClients(_range: DateRange, updatedSince?: number): Promise<ClientRow[]> {
-  const items = await fetchAllPages(withUpdated("/client", updatedSince), "/client");
-  return items.map((c) => ({
+/**
+ * Клиенты (справочник имён/телефонов). Самый «тяжёлый» эндпоинт (~20k строк) — именно
+ * он упирается в лимит частоты Fitbase. Поэтому: пагинация ПОСЛЕДОВАТЕЛЬНО (concurrency=1)
+ * с паузой между запросами и partial-режим — если Fitbase оборвёт выдачу штрафом,
+ * возвращаем то, что успели (complete=false), а не теряем весь синк. Данные — вторичны
+ * (только имена для «Удержания»; атрибуция строится на лидах/касаниях), поэтому неполный
+ * справочник допустим: следующий прогон доберёт (upsert идемпотентен).
+ */
+export async function fetchFitbaseClients(
+  _range: DateRange,
+  updatedSince?: number,
+): Promise<{ rows: ClientRow[]; complete: boolean }> {
+  const { items, complete } = await fetchAllPages(withUpdated("/client", updatedSince), "/client", {
+    concurrency: 1,
+    throttleMs: 350,
+    partialOk: true,
+  });
+  const rows = items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     name: fullName(c),
     phone: extractPhone(c),
@@ -153,6 +206,7 @@ export async function fetchFitbaseClients(_range: DateRange, updatedSince?: numb
     createdAt: toDate(c.created_at),
     raw: c,
   }));
+  return { rows, complete };
 }
 
 /**
@@ -166,7 +220,7 @@ export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadR
   // Пробрасываем funnel_id в запрос (если API учтёт — не тянем лишнее);
   // клиентский фильтр ниже — источник правды на случай, если параметр игнорируется.
   const path = FUNNEL ? `/lead?funnel_id=${encodeURIComponent(FUNNEL)}` : "/lead";
-  const items = await fetchAllPages(path, "/lead");
+  const { items } = await fetchAllPages(path, "/lead");
   const mapped = items.map((l) => ({
     fitbaseId: String(l.id ?? ""),
     clientId: l.client_id != null ? String(l.client_id) : null,
@@ -192,7 +246,7 @@ export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadR
 /** Визиты клиентов (/v2/client/visits) — посещаемость. Тянем недавние по updated_at. */
 export async function fetchFitbaseVisits(range: DateRange): Promise<FitbaseVisitRow[]> {
   const fromUnix = Math.floor(new Date(`${range.from}T00:00:00Z`).getTime() / 1000);
-  const items = await fetchAllPages(`/client/visits?updated_at=${fromUnix}`, "/client/visits");
+  const { items } = await fetchAllPages(`/client/visits?updated_at=${fromUnix}`, "/client/visits");
   return items.map((v) => ({
     fitbaseId: String(v.id ?? ""),
     clientId: v.client_id != null ? String(v.client_id) : null,
@@ -203,7 +257,7 @@ export async function fetchFitbaseVisits(range: DateRange): Promise<FitbaseVisit
 
 /** Абонементы (/v2/client-contract) — суммы оплат = LTV. */
 export async function fetchFitbaseContracts(_range: DateRange, updatedSince?: number): Promise<FitbaseContractRow[]> {
-  const items = await fetchAllPages(withUpdated("/client-contract", updatedSince), "/client-contract");
+  const { items } = await fetchAllPages(withUpdated("/client-contract", updatedSince), "/client-contract");
   return items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     clientId: c.client_id != null ? String(c.client_id) : null,
@@ -234,13 +288,13 @@ export async function fetchFitbasePayments(
   let servicesOk = false;
   let productsOk = false;
   try {
-    services = await fetchAllPages(withUpdated("/client-service", servicesSince), "/client-service");
+    services = (await fetchAllPages(withUpdated("/client-service", servicesSince), "/client-service")).items;
     servicesOk = true;
   } catch (e) {
     console.error("Fitbase /client-service недоступен, пропускаю услуги:", e instanceof Error ? e.message : e);
   }
   try {
-    products = await fetchAllPages(withUpdated("/client-product", productsSince), "/client-product");
+    products = (await fetchAllPages(withUpdated("/client-product", productsSince), "/client-product")).items;
     productsOk = true;
   } catch (e) {
     console.error("Fitbase /client-product недоступен, пропускаю товары:", e instanceof Error ? e.message : e);
