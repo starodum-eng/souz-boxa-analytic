@@ -135,112 +135,141 @@ export async function runFullSync(): Promise<SyncResult[]> {
       for (const r of rows) m.set(r.fitbaseId, r);
       return [...m.values()];
     };
-    // Эндпоинты Fitbase — последовательно (внутри каждого пагинация по 3 стр.
-    // параллельно + повтор при 429), чтобы суммарно не превышать лимит частоты.
-    const clientsSince = await sinceFor("fitbase:client");
-    const contractsSince = await sinceFor("fitbase:client-contract");
-    const clientsRaw = await fetchFitbaseClients(range, clientsSince);
-    const leadsRaw = await fetchFitbaseLeads(range);
-    const contractsRaw = await fetchFitbaseContracts(range, contractsSince);
-    const visitsRaw = await fetchFitbaseVisits(range);
-    const contractRowsAll = dedupe(contractsRaw.filter((c) => c.fitbaseId));
 
-    const clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
-    // Пакетная вставка чанками (neon-http делает HTTP-запрос на каждый вызов).
-    for (let i = 0; i < clientRows.length; i += CHUNK) {
-      const batch = clientRows.slice(i, i + CHUNK);
-      await db
-        .insert(clients)
-        .values(batch)
-        .onConflictDoUpdate({
-          target: [clients.fitbaseId],
-          set: {
-            name: sql`excluded.name`,
-            phone: sql`excluded.phone`,
-            createdAt: sql`excluded.created_at`,
-            updatedAt: new Date(),
-          },
-        });
-    }
-    await setWatermark("fitbase:client", syncStartUnix);
+    // Каждый эндпоинт Fitbase изолирован в своём try/catch: сбой одного (напр.
+    // 429/5xx на /client при штрафе за частоту) НЕ роняет остальные — контракты,
+    // визиты и лиды всё равно сохранятся. Ошибки копим и бросаем сводно в конце,
+    // чтобы sync_log показал «частичный сбой», а не «всё упало».
+    // Порядок: сперва независимые эндпоинты (лиды/контракты/визиты), затем клиенты —
+    // так «тяжёлый» /client не блокирует лёгкие эндпоинты, если упадёт.
+    const errors: string[] = [];
+    let clientRows: Awaited<ReturnType<typeof fetchFitbaseClients>> = [];
+    let contractRowsAll: Awaited<ReturnType<typeof fetchFitbaseContracts>> = [];
+    let total = 0;
 
     // Лиды воронки (атрибуция канала + этап). fetchFitbaseLeads возвращает ПОЛНЫЙ
     // набор нужной воронки за раз, поэтому делаем полное обновление таблицы:
     // при непустом наборе чистим старые лиды (в т.ч. других воронок с прошлых синков),
     // затем вставляем отфильтрованный набор. Пустой ответ таблицу НЕ обнуляет.
-    const leadRows = dedupe(leadsRaw.filter((l) => l.fitbaseId));
-    if (leadRows.length > 0) {
-      await db.execute(sql`DELETE FROM fitbase_leads`);
-    }
-    for (let i = 0; i < leadRows.length; i += CHUNK) {
-      const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
-      await db
-        .insert(fitbaseLeads)
-        .values(batch)
-        .onConflictDoUpdate({
-          target: [fitbaseLeads.fitbaseId],
-          set: {
-            clientId: sql`excluded.client_id`,
-            phoneNorm: sql`excluded.phone_norm`,
-            utmSource: sql`excluded.utm_source`,
-            utmMedium: sql`excluded.utm_medium`,
-            utmCampaign: sql`excluded.utm_campaign`,
-            advertisingSource: sql`excluded.advertising_source`,
-            funnelStep: sql`excluded.funnel_step`,
-            funnelId: sql`excluded.funnel_id`,
-            budget: sql`excluded.budget`,
-            createdAt: sql`excluded.created_at`,
-            updatedAt: new Date(),
-          },
-        });
+    try {
+      const leadsRaw = await fetchFitbaseLeads(range);
+      const leadRows = dedupe(leadsRaw.filter((l) => l.fitbaseId));
+      if (leadRows.length > 0) {
+        await db.execute(sql`DELETE FROM fitbase_leads`);
+      }
+      for (let i = 0; i < leadRows.length; i += CHUNK) {
+        const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));
+        await db
+          .insert(fitbaseLeads)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [fitbaseLeads.fitbaseId],
+            set: {
+              clientId: sql`excluded.client_id`,
+              phoneNorm: sql`excluded.phone_norm`,
+              utmSource: sql`excluded.utm_source`,
+              utmMedium: sql`excluded.utm_medium`,
+              utmCampaign: sql`excluded.utm_campaign`,
+              advertisingSource: sql`excluded.advertising_source`,
+              funnelStep: sql`excluded.funnel_step`,
+              funnelId: sql`excluded.funnel_id`,
+              budget: sql`excluded.budget`,
+              createdAt: sql`excluded.created_at`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      total += leadRows.length;
+    } catch (e) {
+      errors.push(`лиды: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // Абонементы (деньги/LTV).
-    const contractRows = contractRowsAll;
-    for (let i = 0; i < contractRows.length; i += CHUNK) {
-      const batch = contractRows
-        .slice(i, i + CHUNK)
-        .map((c) => ({ ...c, amount: String(c.amount), paid: c.paid ? 1 : 0 }));
-      await db
-        .insert(clientContracts)
-        .values(batch)
-        .onConflictDoUpdate({
-          target: [clientContracts.fitbaseId],
-          set: {
-            clientId: sql`excluded.client_id`,
-            amount: sql`excluded.amount`,
-            paid: sql`excluded.paid`,
-            paymentDate: sql`excluded.payment_date`,
-            beginDate: sql`excluded.begin_date`,
-            endDate: sql`excluded.end_date`,
-            createdAt: sql`excluded.created_at`,
-            updatedAt: new Date(),
-          },
-        });
+    // Абонементы (деньги/LTV, удержание). Нужны также для кассы (услуги/товары).
+    try {
+      const contractsSince = await sinceFor("fitbase:client-contract");
+      const contractsRaw = await fetchFitbaseContracts(range, contractsSince);
+      contractRowsAll = dedupe(contractsRaw.filter((c) => c.fitbaseId));
+      for (let i = 0; i < contractRowsAll.length; i += CHUNK) {
+        const batch = contractRowsAll
+          .slice(i, i + CHUNK)
+          .map((c) => ({ ...c, amount: String(c.amount), paid: c.paid ? 1 : 0 }));
+        await db
+          .insert(clientContracts)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [clientContracts.fitbaseId],
+            set: {
+              clientId: sql`excluded.client_id`,
+              amount: sql`excluded.amount`,
+              paid: sql`excluded.paid`,
+              paymentDate: sql`excluded.payment_date`,
+              beginDate: sql`excluded.begin_date`,
+              endDate: sql`excluded.end_date`,
+              createdAt: sql`excluded.created_at`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      await setWatermark("fitbase:client-contract", syncStartUnix);
+      total += contractRowsAll.length;
+    } catch (e) {
+      errors.push(`контракты: ${e instanceof Error ? e.message : String(e)}`);
     }
-    await setWatermark("fitbase:client-contract", syncStartUnix);
 
-    // Визиты (посещаемость).
-    const visitRows = dedupe(visitsRaw.filter((v) => v.fitbaseId));
-    for (let i = 0; i < visitRows.length; i += CHUNK) {
-      const batch = visitRows.slice(i, i + CHUNK);
-      await db
-        .insert(clientVisits)
-        .values(batch)
-        .onConflictDoUpdate({
-          target: [clientVisits.fitbaseId],
-          set: {
-            clientId: sql`excluded.client_id`,
-            startAt: sql`excluded.start_at`,
-            updatedAt: new Date(),
-          },
-        });
+    // Визиты (посещаемость → удержание «не ходят»).
+    try {
+      const visitsRaw = await fetchFitbaseVisits(range);
+      const visitRows = dedupe(visitsRaw.filter((v) => v.fitbaseId));
+      for (let i = 0; i < visitRows.length; i += CHUNK) {
+        const batch = visitRows.slice(i, i + CHUNK);
+        await db
+          .insert(clientVisits)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [clientVisits.fitbaseId],
+            set: {
+              clientId: sql`excluded.client_id`,
+              startAt: sql`excluded.start_at`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      total += visitRows.length;
+    } catch (e) {
+      errors.push(`визиты: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // Клиенты (справочник имён/телефонов). Самый «тяжёлый» эндпоинт (~20k строк) —
+    // именно он упирается в лимит частоты. Идёт последним, чтобы не блокировать выше.
+    try {
+      const clientsSince = await sinceFor("fitbase:client");
+      const clientsRaw = await fetchFitbaseClients(range, clientsSince);
+      clientRows = dedupe(clientsRaw.filter((c) => c.fitbaseId));
+      // Пакетная вставка чанками (neon-http делает HTTP-запрос на каждый вызов).
+      for (let i = 0; i < clientRows.length; i += CHUNK) {
+        const batch = clientRows.slice(i, i + CHUNK);
+        await db
+          .insert(clients)
+          .values(batch)
+          .onConflictDoUpdate({
+            target: [clients.fitbaseId],
+            set: {
+              name: sql`excluded.name`,
+              phone: sql`excluded.phone`,
+              createdAt: sql`excluded.created_at`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      await setWatermark("fitbase:client", syncStartUnix);
+      total += clientRows.length;
+    } catch (e) {
+      errors.push(`клиенты: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // Единая касса (абонементы + услуги + товары) — НЕКРИТИЧНЫЙ подшаг: его сбой
     // (502/недоступность услуг/товаров) не роняет уже сохранённые клиентов/лидов/
     // контракты/визиты. Выручка дашборда берётся из sales_ledger, client_payments вторичны.
-    let payCount = 0;
     try {
       const svcSince = await sinceFor("fitbase:client-service");
       const prodSince = await sinceFor("fitbase:client-product");
@@ -272,7 +301,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
             },
           });
       }
-      payCount = payRows.length;
+      total += payRows.length;
       // Водяные знаки продвигаем только по реально загруженным эндпоинтам.
       if (pay.servicesOk) await setWatermark("fitbase:client-service", syncStartUnix);
       if (pay.productsOk) await setWatermark("fitbase:client-product", syncStartUnix);
@@ -280,7 +309,12 @@ export async function runFullSync(): Promise<SyncResult[]> {
       console.error("Fitbase касса (услуги/товары) пропущена, ядро сохранено:", e instanceof Error ? e.message : e);
     }
 
-    return clientRows.length + leadRows.length + contractRows.length + visitRows.length + payCount;
+    // Если хоть один основной эндпоинт упал — сохранённое остаётся в БД, но сигналим
+    // об ошибке (частичный сбой) в sync_log, чтобы было видно, что данные неполны.
+    if (errors.length > 0) {
+      throw new Error(`Частичный сбой Fitbase (остальное сохранено). ${errors.join("; ")}`);
+    }
+    return total;
   }));
 
   results.push(await guarded("callibri", async () => {
