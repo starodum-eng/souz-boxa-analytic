@@ -1,0 +1,1 @@
+ALTER TABLE "fitbase_leads" ADD COLUMN "advertising_source_id" varchar(64);

@@ -239,27 +239,35 @@ export async function fetchFitbaseLeads(
       ? String(l.funnel_step.id)
       : null;
 
-  const mapped = items.map((l) => ({
-    fitbaseId: String(l.id ?? ""),
-    clientId: l.client_id != null ? String(l.client_id) : null,
-    phoneNorm: normalizePhone(l.phone),
-    utmSource: l.utm_source ?? null,
-    utmMedium: l.utm_medium ?? null,
-    utmCampaign: l.utm_campaign ?? null,
-    // advertising_source — объект {id,name} или строка
-    advertisingSource:
-      (l.advertising_source && typeof l.advertising_source === "object"
-        ? l.advertising_source.name
-        : l.advertising_source) ?? null,
-    funnelStep:
-      l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
-    // id воронки в API нет → храним id ЭТАПА (funnel_step.id): по нему фильтруем
-    // воронку и его удобно смотреть в GROUP BY funnel_id.
-    funnelId: stepIdOf(l),
-    budget: Number(l.budget) || 0,
-    createdAt: toDate(l.created_at),
-    raw: l,
-  }));
+  const mapped = items.map((l) => {
+    // advertising_source — объект {id,name} или строка. Строку "null"/пусто трактуем
+    // как отсутствие источника (иначе в отчёте появляется паразитный канал «null»).
+    const srcObj = l.advertising_source && typeof l.advertising_source === "object";
+    const srcNameRaw = srcObj ? l.advertising_source.name : l.advertising_source;
+    const srcName =
+      srcNameRaw == null || String(srcNameRaw).trim() === "" || String(srcNameRaw).trim().toLowerCase() === "null"
+        ? null
+        : srcNameRaw;
+    return {
+      fitbaseId: String(l.id ?? ""),
+      clientId: l.client_id != null ? String(l.client_id) : null,
+      phoneNorm: normalizePhone(l.phone),
+      utmSource: l.utm_source ?? null,
+      utmMedium: l.utm_medium ?? null,
+      utmCampaign: l.utm_campaign ?? null,
+      advertisingSource: srcName,
+      // id источника — для кликабельной ссылки в Fitbase (LeadsSearch[advertising_source]).
+      advertisingSourceId: srcObj && l.advertising_source.id != null ? String(l.advertising_source.id) : null,
+      funnelStep:
+        l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
+      // id воронки в API нет → храним id ЭТАПА (funnel_step.id): по нему фильтруем
+      // воронку и его удобно смотреть в GROUP BY funnel_id.
+      funnelId: stepIdOf(l),
+      budget: Number(l.budget) || 0,
+      createdAt: toDate(l.created_at),
+      raw: l,
+    };
+  });
 
   // Список этапов задан → оставляем только их (воронка «Новые лиды»).
   // Не задан → fail-open (все лиды), чтобы не потерять данные до настройки.

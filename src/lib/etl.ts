@@ -175,6 +175,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
               utmMedium: sql`excluded.utm_medium`,
               utmCampaign: sql`excluded.utm_campaign`,
               advertisingSource: sql`excluded.advertising_source`,
+              advertisingSourceId: sql`excluded.advertising_source_id`,
               funnelStep: sql`excluded.funnel_step`,
               funnelId: sql`excluded.funnel_id`,
               budget: sql`excluded.budget`,

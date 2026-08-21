@@ -42,6 +42,7 @@ interface LifetimeRow {
 }
 interface SourceRow {
   source: string;
+  sourceId?: string | null;
   cost: number;
   visits: number;
   leads: number;
@@ -112,6 +113,23 @@ function ymd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+// Веб-адрес Fitbase (не API) для ссылок на списки лидов.
+const FITBASE_WEB = process.env.NEXT_PUBLIC_FITBASE_WEB_URL || "https://soyuz-boksa.fitbase.io";
+/** YYYY-MM-DD → DD.MM.YYYY (формат дат в фильтрах Fitbase). */
+function ddmmyyyy(ymdStr: string): string {
+  const [y, m, d] = ymdStr.split("-");
+  return `${d}.${m}.${y}`;
+}
+/** Ссылка на отфильтрованный список лидов Fitbase: период + (опц.) источник. */
+function fitbaseLeadsUrl(from: string, to: string, sourceId?: string | null): string {
+  const q = new URLSearchParams();
+  q.set("LeadsSearch[created_date_from]", ddmmyyyy(from));
+  q.set("LeadsSearch[created_date_to]", ddmmyyyy(to));
+  q.set("LeadsSearch[created_date_range]", `${ddmmyyyy(from)} - ${ddmmyyyy(to)}`);
+  if (sourceId) q.set("LeadsSearch[advertising_source]", sourceId);
+  return `${FITBASE_WEB.replace(/\/$/, "")}/leads/index?${q.toString()}`;
 }
 function addDays(d: Date, n: number): Date {
   const x = new Date(d);
@@ -342,6 +360,7 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
       const cost = Number(s.cost);
       return {
         source: s.source,
+        sourceId: s.sourceId ?? null,
         visits,
         leads,
         clients,
@@ -608,7 +627,21 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                       <td>Итого / Среднее</td>
                       <td>{num(tot.visits)}</td>
                       <td>{tot.visits > 0 ? pct(tot.leads / tot.visits) : "—"}</td>
-                      <td>{num(tot.leads)}</td>
+                      <td>
+                        {tot.leads > 0 ? (
+                          <a
+                            className="num-link"
+                            href={fitbaseLeadsUrl(from, to)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Открыть все заявки за период в Fitbase"
+                          >
+                            {num(tot.leads)}
+                          </a>
+                        ) : (
+                          num(tot.leads)
+                        )}
+                      </td>
                       <td>{tot.clients > 0 ? pct(tot.paying / tot.clients) : "—"}</td>
                       <td>{num(tot.paying)}</td>
                       <td>{rub(tot.revenue)}</td>
@@ -637,7 +670,21 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                           </td>
                           <td><span className="num-link">{num(r.visits)}</span></td>
                           <td><MiniBar val={r.convLead} max={maxConvLead} /></td>
-                          <td><span className="num-link">{num(r.leads)}</span></td>
+                          <td>
+                            {r.leads > 0 ? (
+                              <a
+                                className="num-link"
+                                href={fitbaseLeadsUrl(from, to, r.sourceId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Открыть эти заявки в Fitbase"
+                              >
+                                {num(r.leads)}
+                              </a>
+                            ) : (
+                              <span className="num-link">0</span>
+                            )}
+                          </td>
                           <td><MiniBar val={r.convSale} max={maxConvSale} /></td>
                           <td><span className="num-link">{num(r.sales)}</span></td>
                           <td><span className="num-link">{rub(r.revenue)}</span></td>

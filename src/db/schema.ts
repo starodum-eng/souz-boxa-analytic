@@ -145,6 +145,7 @@ export const fitbaseLeads = pgTable(
     utmMedium: varchar("utm_medium", { length: 256 }),
     utmCampaign: varchar("utm_campaign", { length: 256 }),
     advertisingSource: varchar("advertising_source", { length: 256 }),
+    advertisingSourceId: varchar("advertising_source_id", { length: 64 }),
     funnelStep: varchar("funnel_step", { length: 256 }),
     funnelId: varchar("funnel_id", { length: 64 }),
     budget: numeric("budget", { precision: 14, scale: 2 }).notNull().default("0"),

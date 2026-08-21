@@ -371,6 +371,12 @@ table.report tbody tr {
   border-bottom: 1px dotted var(--link);
   cursor: pointer;
 }
+a.num-link {
+  text-decoration: none;
+}
+a.num-link:hover {
+  border-bottom-style: solid;
+}
 .expand-btn {
   display: inline-flex;
   width: 16px;

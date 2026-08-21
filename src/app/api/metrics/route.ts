@@ -391,10 +391,13 @@ export async function GET(req: Request) {
         WHEN lower(coalesce(fl.utm_source,'')) LIKE '%yandex%' OR lower(coalesce(fl.utm_source,'')) LIKE '%direct%' THEN 'Яндекс.Директ'
         WHEN lower(coalesce(fl.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
         WHEN lower(coalesce(fl.advertising_source,'')) LIKE '%вконтакте%' THEN 'VK Реклама'
-        WHEN coalesce(fl.advertising_source,'') <> '' THEN fl.advertising_source
+        -- строку-источник "null"/пусто не считаем источником → «Не определён»
+        WHEN lower(trim(coalesce(fl.advertising_source,''))) NOT IN ('', 'null') THEN fl.advertising_source
         ELSE 'Не определён'
       END AS source,
-      COUNT(*)::int AS leads
+      COUNT(*)::int AS leads,
+      -- id источника для ссылки: только если канал собран ровно из одного источника
+      CASE WHEN COUNT(DISTINCT fl.advertising_source_id) = 1 THEN MAX(fl.advertising_source_id) END AS source_id
     FROM fitbase_leads fl
     LEFT JOIN source_mappings m ON coalesce(fl.utm_source,'') <> '' AND m.utm_source = lower(fl.utm_source)
     WHERE fl.created_at IS NOT NULL
@@ -404,6 +407,9 @@ export async function GET(req: Request) {
   `);
   const leadsByChannel = new Map<string, number>(
     leadsByChannelRows.rows.map((r) => [String(r.source), Number(r.leads)]),
+  );
+  const leadsSourceId = new Map<string, string | null>(
+    leadsByChannelRows.rows.map((r) => [String(r.source), r.source_id != null ? String(r.source_id) : null]),
   );
   const leadsTotal = [...leadsByChannel.values()].reduce((a, b) => a + b, 0);
 
@@ -534,6 +540,8 @@ export async function GET(req: Request) {
       clicks: Number(ad?.clicks ?? 0),
       visits: Number(ad?.visits ?? 0),
       leads,
+      // id источника Fitbase (если канал = один источник) — для ссылки на список лидов
+      sourceId: leadsSourceId.get(source) ?? null,
       clients: cr.clients,
       paying: cr.paying,
       revenue, // касса за период
@@ -567,6 +575,7 @@ export async function GET(req: Request) {
     else
       bySourceMerged.push({
         source: "Не определён",
+        sourceId: null,
         cost: 0,
         clicks: 0,
         visits: 0,
