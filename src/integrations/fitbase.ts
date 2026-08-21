@@ -224,24 +224,11 @@ export async function fetchFitbaseLeads(
   const path = FUNNEL ? `/lead?funnel_id=${encodeURIComponent(FUNNEL)}` : "/lead";
   const { items } = await fetchAllPages(path, "/lead");
 
-  // ДИАГНОСТИКА (Vercel logs): реальное имя поля воронки в ответе /lead. Смотрим
-  // первые записи, чтобы понять, как называется id воронки и его значение для
-  // «Новые лиды». Дёшево (2 строки/синк), помогает выставить FITBASE_LEADS_FUNNEL_ID.
-  for (const l of items.slice(0, 2)) {
-    console.log(
-      "RAW LEAD KEYS",
-      JSON.stringify({
-        funnels_id: l.funnels_id,
-        funnel_id: l.funnel_id,
-        funnel: l.funnel,
-        funnel_step: l.funnel_step,
-        created_at: l.created_at,
-      }),
-    );
-  }
-
   const mapped = items.map((l) => {
-    // Достаём id воронки из всех правдоподобных мест (имя поля в API v2 плавает).
+    // ВАЖНО: в ответе /lead НЕТ id воронки (проверено на сырых данных: есть только
+    // funnel_step-этап, без ссылки на воронку). Воронка выбирается на стороне сервера
+    // через query-параметр ?funnel_id=<FUNNEL>. Оставляем coalesce на случай, если
+    // Fitbase когда-нибудь начнёт отдавать поле, но сейчас оно ожидаемо null.
     const rawFunnel =
       l.funnels_id ??
       l.funnel_id ??
