@@ -210,57 +210,60 @@ export async function fetchFitbaseClients(
 }
 
 /**
- * Лиды из воронки (/v2/lead) — с UTM, этапом, источником, бюджетом, client_id.
- * По бизнес-логике работаем только с воронкой «Новые лиды» (funnels_id=1):
- * фильтруем по FITBASE_LEADS_FUNNEL_ID (пусто → все воронки, обратная совместимость).
- * id воронки — поле `funnels_id`; эндпоинт также принимает query `funnel_id`.
+ * Лиды из /v2/lead — с UTM, этапом, источником, бюджетом, client_id.
+ *
+ * ВАЖНО (проверено пробником /api/fitbase-probe на боевых данных):
+ *  • В API v2 НЕТ фильтра по воронке и нет справочника воронок: query-параметры
+ *    funnel_id / funnels_id / funnel / pipeline_id игнорируются (total_count не
+ *    меняется), а эндпоинты /funnel, /funnels, /funnel/{id} отдают 404.
+ *  • В самом лиде id воронки тоже НЕТ — есть только объект-этап `funnel_step`.
+ *  • Единственный рабочий серверный фильтр — `funnel_step_id` (по ОДНОМУ этапу).
+ *
+ * Поэтому воронку «Новые лиды» задаём СПИСКОМ id её этапов — FITBASE_LEADS_STEP_IDS
+ * (напр. "1,3,4,7"). Тянем все лиды одним проходом и оставляем только эти этапы.
+ * Пока список НЕ задан — fail-open (берём все лиды), чтобы ничего не потерять.
  */
 export async function fetchFitbaseLeads(
   _range: DateRange,
 ): Promise<{ rows: FitbaseLeadRow[]; rawCount: number }> {
-  const FUNNEL = (process.env.FITBASE_LEADS_FUNNEL_ID ?? "1").trim();
-  // Пробрасываем funnel_id в запрос (если API учтёт — не тянем лишнее);
-  // клиентский фильтр ниже — источник правды на случай, если параметр игнорируется.
-  const path = FUNNEL ? `/lead?funnel_id=${encodeURIComponent(FUNNEL)}` : "/lead";
-  const { items } = await fetchAllPages(path, "/lead");
+  const STEP_IDS = new Set(
+    (process.env.FITBASE_LEADS_STEP_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const { items } = await fetchAllPages("/lead", "/lead");
 
-  const mapped = items.map((l) => {
-    // ВАЖНО: в ответе /lead НЕТ id воронки (проверено на сырых данных: есть только
-    // funnel_step-этап, без ссылки на воронку). Воронка выбирается на стороне сервера
-    // через query-параметр ?funnel_id=<FUNNEL>. Оставляем coalesce на случай, если
-    // Fitbase когда-нибудь начнёт отдавать поле, но сейчас оно ожидаемо null.
-    const rawFunnel =
-      l.funnels_id ??
-      l.funnel_id ??
-      (l.funnel && typeof l.funnel === "object" ? l.funnel.id : l.funnel) ??
-      (l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.funnels_id : null);
-    const funnelId = rawFunnel != null ? String(rawFunnel) : null;
-    return {
-      fitbaseId: String(l.id ?? ""),
-      clientId: l.client_id != null ? String(l.client_id) : null,
-      phoneNorm: normalizePhone(l.phone),
-      utmSource: l.utm_source ?? null,
-      utmMedium: l.utm_medium ?? null,
-      utmCampaign: l.utm_campaign ?? null,
-      // advertising_source — объект {id,name} или строка
-      advertisingSource:
-        (l.advertising_source && typeof l.advertising_source === "object"
-          ? l.advertising_source.name
-          : l.advertising_source) ?? null,
-      funnelStep:
-        l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
-      funnelId,
-      budget: Number(l.budget) || 0,
-      createdAt: toDate(l.created_at),
-      raw: l,
-    };
-  });
+  const stepIdOf = (l: any): string | null =>
+    l?.funnel_step && typeof l.funnel_step === "object" && l.funnel_step.id != null
+      ? String(l.funnel_step.id)
+      : null;
 
-  // FAIL-OPEN: отбрасываем лид ТОЛЬКО если его воронка ЗНАЕМА и не равна целевой.
-  // Неопознанную воронку (funnelId == null) НИКОГДА не выкидываем молча — иначе
-  // рассинхрон имени поля обнулит всю таблицу. В худшем случае попадут лишние
-  // воронки (это видно и легко чинится), но реальные лиды не пропадут.
-  const rows = mapped.filter((r) => !FUNNEL || r.funnelId == null || r.funnelId === FUNNEL);
+  const mapped = items.map((l) => ({
+    fitbaseId: String(l.id ?? ""),
+    clientId: l.client_id != null ? String(l.client_id) : null,
+    phoneNorm: normalizePhone(l.phone),
+    utmSource: l.utm_source ?? null,
+    utmMedium: l.utm_medium ?? null,
+    utmCampaign: l.utm_campaign ?? null,
+    // advertising_source — объект {id,name} или строка
+    advertisingSource:
+      (l.advertising_source && typeof l.advertising_source === "object"
+        ? l.advertising_source.name
+        : l.advertising_source) ?? null,
+    funnelStep:
+      l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
+    // id воронки в API нет → храним id ЭТАПА (funnel_step.id): по нему фильтруем
+    // воронку и его удобно смотреть в GROUP BY funnel_id.
+    funnelId: stepIdOf(l),
+    budget: Number(l.budget) || 0,
+    createdAt: toDate(l.created_at),
+    raw: l,
+  }));
+
+  // Список этапов задан → оставляем только их (воронка «Новые лиды»).
+  // Не задан → fail-open (все лиды), чтобы не потерять данные до настройки.
+  const rows = STEP_IDS.size ? mapped.filter((r) => r.funnelId != null && STEP_IDS.has(r.funnelId)) : mapped;
   return { rows, rawCount: items.length };
 }
 
