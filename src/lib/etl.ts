@@ -151,10 +151,15 @@ export async function runFullSync(): Promise<SyncResult[]> {
     // при непустом наборе чистим старые лиды (в т.ч. других воронок с прошлых синков),
     // затем вставляем отфильтрованный набор. Пустой ответ таблицу НЕ обнуляет.
     try {
-      const leadsRaw = await fetchFitbaseLeads(range);
+      const { rows: leadsRaw, rawCount } = await fetchFitbaseLeads(range);
       const leadRows = dedupe(leadsRaw.filter((l) => l.fitbaseId));
+      // Обнуляем таблицу ТОЛЬКО когда есть чем заменить. Если /lead вернул строки,
+      // а после фильтра пусто — это подозрительно (сбой фильтра/поля воронки):
+      // НЕ трогаем таблицу, сохраняем прошлый набор и сигналим в лог.
       if (leadRows.length > 0) {
         await db.execute(sql`DELETE FROM fitbase_leads`);
+      } else if (rawCount > 0) {
+        console.warn(`Fitbase /lead: сырой ответ непустой (${rawCount}), но после фильтра 0 лидов — таблицу НЕ обнуляю`);
       }
       for (let i = 0; i < leadRows.length; i += CHUNK) {
         const batch = leadRows.slice(i, i + CHUNK).map((l) => ({ ...l, budget: String(l.budget) }));

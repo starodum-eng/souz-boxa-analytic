@@ -215,32 +215,66 @@ export async function fetchFitbaseClients(
  * фильтруем по FITBASE_LEADS_FUNNEL_ID (пусто → все воронки, обратная совместимость).
  * id воронки — поле `funnels_id`; эндпоинт также принимает query `funnel_id`.
  */
-export async function fetchFitbaseLeads(_range: DateRange): Promise<FitbaseLeadRow[]> {
+export async function fetchFitbaseLeads(
+  _range: DateRange,
+): Promise<{ rows: FitbaseLeadRow[]; rawCount: number }> {
   const FUNNEL = (process.env.FITBASE_LEADS_FUNNEL_ID ?? "1").trim();
   // Пробрасываем funnel_id в запрос (если API учтёт — не тянем лишнее);
   // клиентский фильтр ниже — источник правды на случай, если параметр игнорируется.
   const path = FUNNEL ? `/lead?funnel_id=${encodeURIComponent(FUNNEL)}` : "/lead";
   const { items } = await fetchAllPages(path, "/lead");
-  const mapped = items.map((l) => ({
-    fitbaseId: String(l.id ?? ""),
-    clientId: l.client_id != null ? String(l.client_id) : null,
-    phoneNorm: normalizePhone(l.phone),
-    utmSource: l.utm_source ?? null,
-    utmMedium: l.utm_medium ?? null,
-    utmCampaign: l.utm_campaign ?? null,
-    // advertising_source — объект {id,name} или строка
-    advertisingSource:
-      (l.advertising_source && typeof l.advertising_source === "object"
-        ? l.advertising_source.name
-        : l.advertising_source) ?? null,
-    funnelStep:
-      l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
-    funnelId: l.funnels_id != null ? String(l.funnels_id) : null,
-    budget: Number(l.budget) || 0,
-    createdAt: toDate(l.created_at),
-    raw: l,
-  }));
-  return FUNNEL ? mapped.filter((r) => r.funnelId === FUNNEL) : mapped;
+
+  // ДИАГНОСТИКА (Vercel logs): реальное имя поля воронки в ответе /lead. Смотрим
+  // первые записи, чтобы понять, как называется id воронки и его значение для
+  // «Новые лиды». Дёшево (2 строки/синк), помогает выставить FITBASE_LEADS_FUNNEL_ID.
+  for (const l of items.slice(0, 2)) {
+    console.log(
+      "RAW LEAD KEYS",
+      JSON.stringify({
+        funnels_id: l.funnels_id,
+        funnel_id: l.funnel_id,
+        funnel: l.funnel,
+        funnel_step: l.funnel_step,
+        created_at: l.created_at,
+      }),
+    );
+  }
+
+  const mapped = items.map((l) => {
+    // Достаём id воронки из всех правдоподобных мест (имя поля в API v2 плавает).
+    const rawFunnel =
+      l.funnels_id ??
+      l.funnel_id ??
+      (l.funnel && typeof l.funnel === "object" ? l.funnel.id : l.funnel) ??
+      (l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.funnels_id : null);
+    const funnelId = rawFunnel != null ? String(rawFunnel) : null;
+    return {
+      fitbaseId: String(l.id ?? ""),
+      clientId: l.client_id != null ? String(l.client_id) : null,
+      phoneNorm: normalizePhone(l.phone),
+      utmSource: l.utm_source ?? null,
+      utmMedium: l.utm_medium ?? null,
+      utmCampaign: l.utm_campaign ?? null,
+      // advertising_source — объект {id,name} или строка
+      advertisingSource:
+        (l.advertising_source && typeof l.advertising_source === "object"
+          ? l.advertising_source.name
+          : l.advertising_source) ?? null,
+      funnelStep:
+        l.funnel_step && typeof l.funnel_step === "object" ? l.funnel_step.name : l.funnel_step ?? null,
+      funnelId,
+      budget: Number(l.budget) || 0,
+      createdAt: toDate(l.created_at),
+      raw: l,
+    };
+  });
+
+  // FAIL-OPEN: отбрасываем лид ТОЛЬКО если его воронка ЗНАЕМА и не равна целевой.
+  // Неопознанную воронку (funnelId == null) НИКОГДА не выкидываем молча — иначе
+  // рассинхрон имени поля обнулит всю таблицу. В худшем случае попадут лишние
+  // воронки (это видно и легко чинится), но реальные лиды не пропадут.
+  const rows = mapped.filter((r) => !FUNNEL || r.funnelId == null || r.funnelId === FUNNEL);
+  return { rows, rawCount: items.length };
 }
 
 /** Визиты клиентов (/v2/client/visits) — посещаемость. Тянем недавние по updated_at. */
