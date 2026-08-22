@@ -243,6 +243,20 @@ export const salesLedger = pgTable(
 );
 
 /**
+ * Журнал загрузок CSV «Отчёт по продажам» → sales_ledger.
+ * Одна строка на каждую загрузку (даже повторную): что, когда, за какой период.
+ */
+export const importLog = pgTable("import_log", {
+  id: serial("id").primaryKey(),
+  filename: varchar("filename", { length: 256 }),
+  importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+  rangeFrom: date("range_from"), // мин. дата оплаты в файле
+  rangeTo: date("range_to"), // макс. дата оплаты в файле
+  rows: integer("rows").notNull().default(0), // сколько строк распознано
+  sumPaid: numeric("sum_paid", { precision: 14, scale: 2 }).notNull().default("0"),
+});
+
+/**
  * Визиты клиентов Fitbase (/v2/client/visits) — посещаемость по дням.
  */
 export const clientVisits = pgTable(

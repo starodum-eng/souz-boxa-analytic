@@ -18,7 +18,7 @@ export const runtime = "nodejs";
  *   либо POST с ?key=<CRON_SECRET> и телом CSV.
  */
 
-const { salesLedger } = schema;
+const { salesLedger, importLog } = schema;
 
 function norm(s: string): string {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -63,19 +63,52 @@ function parseAmount(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** История загрузок + сводка покрытия данных (для вкладки «Импорт»). */
 export async function GET() {
-  return NextResponse.json({ ok: true, hint: "POST CSV сюда: file=<csv>, secret=<CRON_SECRET>" });
+  const history = await db.execute(sql`
+    SELECT filename, imported_at, range_from, range_to, rows, sum_paid
+    FROM import_log
+    ORDER BY imported_at DESC
+    LIMIT 50
+  `);
+  const coverage = await db.execute(sql`
+    SELECT
+      MIN((pay_date AT TIME ZONE 'Europe/Moscow')::date) AS from,
+      MAX((pay_date AT TIME ZONE 'Europe/Moscow')::date) AS to,
+      COUNT(DISTINCT (pay_date AT TIME ZONE 'Europe/Moscow')::date)::int AS days,
+      COALESCE(SUM(amount), 0) AS total
+    FROM sales_ledger
+    WHERE pay_date IS NOT NULL
+  `);
+  const byMonth = await db.execute(sql`
+    SELECT
+      to_char((pay_date AT TIME ZONE 'Europe/Moscow'), 'YYYY-MM') AS month,
+      COUNT(DISTINCT (pay_date AT TIME ZONE 'Europe/Moscow')::date)::int AS days,
+      COALESCE(SUM(amount), 0) AS sum
+    FROM sales_ledger
+    WHERE pay_date IS NOT NULL
+    GROUP BY 1
+    ORDER BY 1 DESC
+  `);
+  return NextResponse.json({
+    history: history.rows,
+    coverage: coverage.rows[0] ?? { from: null, to: null, days: 0, total: 0 },
+    byMonth: byMonth.rows,
+  });
 }
 
 export async function POST(req: Request) {
   // Доступ закрывает middleware (Basic Auth дашборда) — отдельного ключа не нужно.
   let csvText = "";
+  let filename = "csv";
   const ctype = req.headers.get("content-type") ?? "";
   if (ctype.includes("multipart/form-data")) {
     const form = await req.formData();
     const f = form.get("file");
-    if (f && typeof (f as File).text === "function") csvText = await (f as File).text();
-    else if (form.get("csv")) csvText = String(form.get("csv"));
+    if (f && typeof (f as File).text === "function") {
+      csvText = await (f as File).text();
+      filename = (f as File).name || "csv";
+    } else if (form.get("csv")) csvText = String(form.get("csv"));
   } else {
     csvText = await req.text();
   }
@@ -183,6 +216,15 @@ export async function POST(req: Request) {
     if (d && (!minD || d < minD)) minD = d;
     if (d && (!maxD || d > maxD)) maxD = d;
   }
+
+  // Журнал загрузок: одна строка на каждую загрузку (включая повторную).
+  await db.insert(importLog).values({
+    filename: filename.slice(0, 256),
+    rangeFrom: minD || null,
+    rangeTo: maxD || null,
+    rows: records.length,
+    sumPaid: String(Math.round(sum * 100) / 100),
+  });
 
   return NextResponse.json({
     ok: true,

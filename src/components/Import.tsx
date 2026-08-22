@@ -1,6 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+
+/** YYYY-MM-DD → DD.MM.YYYY (null/пусто → «—»). */
+function ru(d: string | null | undefined): string {
+  if (!d) return "—";
+  const [y, m, day] = String(d).slice(0, 10).split("-");
+  return day && m && y ? `${day}.${m}.${y}` : String(d);
+}
+/** ISO-время → dd.mm.yyyy HH:MM (локально). */
+function ruDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const dt = new Date(iso);
+  if (isNaN(dt.getTime())) return String(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`;
+}
+function money(v: unknown): string {
+  return `${Math.round(Number(v) || 0).toLocaleString("ru-RU")} ₽`;
+}
+/** YYYY-MM → «Август 2025». */
+const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+function ruMonth(ym: string): string {
+  const [y, m] = ym.split("-");
+  const idx = Number(m) - 1;
+  return idx >= 0 && idx < 12 ? `${MONTHS[idx]} ${y}` : ym;
+}
+
+interface HistoryRow {
+  filename: string | null;
+  imported_at: string | null;
+  range_from: string | null;
+  range_to: string | null;
+  rows: number;
+  sum_paid: string | number;
+}
+interface ImportInfo {
+  history: HistoryRow[];
+  coverage: { from: string | null; to: string | null; days: number; total: string | number };
+  byMonth: { month: string; days: number; sum: string | number }[];
+}
 
 /**
  * Импорт выручки: заливаем CSV из Fitbase «Отчёт по продажам».
@@ -12,6 +51,20 @@ export default function Import() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<ImportInfo | null>(null);
+
+  const loadInfo = useCallback(async () => {
+    try {
+      const res = await fetch("/api/import-sales");
+      if (res.ok) setInfo(await res.json());
+    } catch {
+      /* тихо — блок истории просто не покажется */
+    }
+  }, []);
+
+  useEffect(() => {
+    loadInfo();
+  }, [loadInfo]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +81,10 @@ export default function Import() {
       const res = await fetch("/api/import-sales", { method: "POST", body: fd });
       const json = await res.json();
       if (!res.ok) setError(json.error || "Ошибка импорта");
-      else setResult(json);
+      else {
+        setResult(json);
+        loadInfo(); // обновляем историю и покрытие сразу после загрузки
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -114,6 +170,76 @@ export default function Import() {
           <div style={{ marginTop: 10, opacity: 0.85 }}>{String(result.note)}</div>
         </div>
       )}
+
+      {/* Покрытие данных */}
+      <div className="section-title" style={{ marginTop: 26 }}>Покрытие данных</div>
+      <div className="card" style={{ fontSize: 14, lineHeight: 1.55 }}>
+        {info && info.coverage.from ? (
+          <>
+            <div>
+              Касса есть за период <b>{ru(info.coverage.from)} – {ru(info.coverage.to)}</b> · дней с оплатами:{" "}
+              <b>{info.coverage.days}</b> · всего: <b>{money(info.coverage.total)}</b>
+            </div>
+            {info.byMonth.length > 0 && (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="report">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Месяц</th>
+                      <th>Дней с данными</th>
+                      <th>Касса</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {info.byMonth.map((m) => (
+                      <tr key={m.month}>
+                        <td style={{ textAlign: "left" }}>{ruMonth(m.month)}</td>
+                        <td>{m.days}</td>
+                        <td>{money(m.sum)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="muted">Ещё не загружено.</div>
+        )}
+      </div>
+
+      {/* История загрузок */}
+      <div className="section-title" style={{ marginTop: 26 }}>История загрузок</div>
+      <div className="card" style={{ fontSize: 14 }}>
+        {info && info.history.length > 0 ? (
+          <div className="table-wrap">
+            <table className="report">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left" }}>Дата загрузки</th>
+                  <th style={{ textAlign: "left" }}>Файл</th>
+                  <th>Период файла</th>
+                  <th>Строк</th>
+                  <th>Сумма</th>
+                </tr>
+              </thead>
+              <tbody>
+                {info.history.map((h, i) => (
+                  <tr key={i}>
+                    <td style={{ textAlign: "left" }}>{ruDateTime(h.imported_at)}</td>
+                    <td style={{ textAlign: "left", wordBreak: "break-all" }}>{h.filename || "—"}</td>
+                    <td>{ru(h.range_from)} – {ru(h.range_to)}</td>
+                    <td>{Number(h.rows).toLocaleString("ru-RU")}</td>
+                    <td>{money(h.sum_paid)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="muted">Загрузок ещё не было.</div>
+        )}
+      </div>
     </div>
   );
 }
