@@ -707,37 +707,35 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                               {channelCells(ch, true)}
                             </tr>
                           ))}
-                        {open && hasCamps && (
-                          <tr className="campaign-row">
-                            <td colSpan={REP_COLS.length}>
-                              <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
-                                Кампании канала. Атрибуция на уровне кампании не настроена — только расход/клики/показы.
-                              </div>
-                              <table style={{ width: "100%" }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ textAlign: "left" }}>Кампания</th>
-                                    <th>Расход</th>
-                                    <th>Клики</th>
-                                    <th>Показы</th>
-                                    <th>CPC</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {r.campaigns.map((c, i) => (
-                                    <tr key={i}>
-                                      <td style={{ textAlign: "left" }}>{c.campaign_name}</td>
-                                      <td>{rub(c.cost)}</td>
-                                      <td>{num(c.clicks)}</td>
-                                      <td>{num(c.impressions)}</td>
-                                      <td>{Number(c.clicks) > 0 ? rub(Number(c.cost) / Number(c.clicks)) : "—"}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </td>
-                          </tr>
-                        )}
+                        {open &&
+                          hasCamps &&
+                          r.campaigns.map((c, i) => {
+                            const cpc = Number(c.clicks) > 0 ? Number(c.cost) / Number(c.clicks) : null;
+                            // Кампания транслирует колонки родителя: расход → «Расходы»,
+                            // остальные (воронка/выручка) не считаются на уровне кампании → «—».
+                            // Клики/показы/CPC — в подсказке на названии.
+                            return (
+                              <tr key={r.source + "/camp/" + i} className="child-row">
+                                <td
+                                  style={{ paddingLeft: 26 }}
+                                  title={`Клики: ${num(c.clicks)} · Показы: ${num(c.impressions)}${cpc != null ? ` · CPC: ${rub(cpc)}` : ""}`}
+                                >
+                                  <span className="muted" style={{ marginRight: 4 }}>└</span>
+                                  {c.campaign_name}
+                                </td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td className="muted">—</td>
+                                <td>{rub(c.cost)}</td>
+                                <td className="muted">—</td>
+                              </tr>
+                            );
+                          })}
                       </Fragment>
                     );
                   })}
@@ -753,8 +751,9 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             </div>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-            «Прибыль» = выручка − рекламные расходы (маржа, без себестоимости абонемента). Раскрытие «+» —
-            только у платных каналов (расход/клики/показы/CPC); per-campaign воронка не считается.
+            «Прибыль» = выручка − рекламные расходы (маржа, без себестоимости абонемента). «+» раскрывает
+            подканалы (их сумма сходится с родителем) или кампании платного канала — у кампаний считается
+            только расход (клики/показы/CPC — в подсказке), воронка на уровне кампании не считается («—»).
           </div>
 
           <div className="section-title">Воронка периода</div>
