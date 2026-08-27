@@ -62,6 +62,10 @@ interface CampaignRow {
   clicks: number;
   impressions: number;
 }
+interface ReportRow extends SourceRow {
+  children: SourceRow[];
+  campaigns: CampaignRow[];
+}
 interface InfluenceRow {
   source: string;
   clients: number;
@@ -99,6 +103,7 @@ interface Data {
   totals: Totals;
   prevTotals?: { cost: number; leads: number; new_clients: number; revenue: number };
   bySource: SourceRow[];
+  report: ReportRow[];
   campaignsBySource: CampaignRow[];
   channelInfluence: InfluenceRow[];
   lifetimeByChannel: LifetimeRow[];
@@ -348,32 +353,37 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
     return map;
   }, []);
 
-  // Строки отчёта по каналам.
+  // Строки отчёта по каналам — укрупнённые родители с детьми/кампаниями (ТЗ №18).
+  const toDisplay = (s: SourceRow) => {
+    const visits = Number(s.visits);
+    const leads = Number(s.leads);
+    const clients = Number(s.clients);
+    const sales = Number(s.paying);
+    const revenue = Number(s.revenue);
+    const cost = Number(s.cost);
+    return {
+      source: s.source,
+      sourceId: s.sourceId ?? null,
+      visits,
+      leads,
+      clients,
+      sales,
+      revenue,
+      cost,
+      convLead: visits > 0 ? leads / visits : null,
+      convSale: clients > 0 ? sales / clients : null,
+      avgCheck: sales > 0 ? revenue / sales : null,
+      profit: revenue - cost,
+      roi: s.romiCohort,
+    };
+  };
   const repRows = useMemo(() => {
     if (!data) return [];
-    return data.bySource.map((s) => {
-      const visits = Number(s.visits);
-      const leads = Number(s.leads);
-      const clients = Number(s.clients);
-      const sales = Number(s.paying);
-      const revenue = Number(s.revenue);
-      const cost = Number(s.cost);
-      return {
-        source: s.source,
-        sourceId: s.sourceId ?? null,
-        visits,
-        leads,
-        clients,
-        sales,
-        revenue,
-        cost,
-        convLead: visits > 0 ? leads / visits : null,
-        convSale: clients > 0 ? sales / clients : null,
-        avgCheck: sales > 0 ? revenue / sales : null,
-        profit: revenue - cost,
-        roi: s.romiCohort,
-      };
-    });
+    return data.report.map((p) => ({
+      ...toDisplay(p),
+      children: p.children.map(toDisplay),
+      campaigns: p.campaigns,
+    }));
   }, [data]);
 
   const sortedRows = useMemo(() => {
@@ -390,16 +400,6 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
     });
     return rows;
   }, [repRows, sortKey, sortDir]);
-
-  const campaignsBy = useMemo(() => {
-    const m = new Map<string, CampaignRow[]>();
-    if (data) for (const c of data.campaignsBySource) {
-      const arr = m.get(c.source) ?? [];
-      arr.push(c);
-      m.set(c.source, arr);
-    }
-    return m;
-  }, [data]);
 
   const maxConvLead = Math.max(0, ...repRows.map((r) => r.convLead ?? 0));
   const maxConvSale = Math.max(0, ...repRows.map((r) => r.convSale ?? 0));
@@ -419,6 +419,36 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
   ];
 
   const tot = data ? sumMetrics(data.bySource) : null;
+
+  // Ячейки строки канала (общие для родителя и ребёнка). expandNode — «+/−», indent — отступ ребёнка.
+  type DisplayRow = ReturnType<typeof toDisplay>;
+  const channelCells = (r: DisplayRow, indent = false, expandNode: React.ReactNode = null) => (
+    <>
+      <td style={indent ? { paddingLeft: 26 } : undefined}>
+        {expandNode}
+        {indent && <span className="muted" style={{ marginRight: 4 }}>└</span>}
+        {SOURCE_LABEL[r.source] ?? r.source}
+      </td>
+      <td><span className="num-link">{num(r.visits)}</span></td>
+      <td><MiniBar val={r.convLead} max={maxConvLead} /></td>
+      <td>
+        {r.leads > 0 ? (
+          <a className="num-link" href={fitbaseLeadsUrl(from, to, r.sourceId)} target="_blank" rel="noopener noreferrer" title="Открыть эти заявки в Fitbase">
+            {num(r.leads)}
+          </a>
+        ) : (
+          <span className="num-link">0</span>
+        )}
+      </td>
+      <td><MiniBar val={r.convSale} max={maxConvSale} /></td>
+      <td><span className="num-link">{num(r.sales)}</span></td>
+      <td><span className="num-link">{rub(r.revenue)}</span></td>
+      <td>{r.avgCheck != null ? rub(r.avgCheck) : "—"}</td>
+      <td className={r.profit < 0 ? "neg" : ""}>{rub(r.profit)}</td>
+      <td><span className="num-link">{rub(r.cost)}</span></td>
+      <td className={r.roi != null ? (Number(r.roi) >= 0 ? "pos" : "neg") : "muted"}>{pct(r.roi)}</td>
+    </>
+  );
 
   return (
     <div className="container">
@@ -654,46 +684,30 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                     </tr>
                   )}
                   {sortedRows.map((r) => {
-                    const camps = campaignsBy.get(r.source);
-                    const canExpand = !!camps?.length;
+                    const hasChildren = r.children.length > 0;
+                    const hasCamps = r.campaigns.length > 0;
+                    const canExpand = hasChildren || hasCamps;
                     const open = expanded.has(r.source);
                     return (
                       <Fragment key={r.source}>
                         <tr>
-                          <td>
-                            {canExpand && (
+                          {channelCells(
+                            r,
+                            false,
+                            canExpand ? (
                               <span className="expand-btn" onClick={() => toggleExpand(r.source)}>
                                 {open ? "−" : "+"}
                               </span>
-                            )}
-                            {SOURCE_LABEL[r.source] ?? r.source}
-                          </td>
-                          <td><span className="num-link">{num(r.visits)}</span></td>
-                          <td><MiniBar val={r.convLead} max={maxConvLead} /></td>
-                          <td>
-                            {r.leads > 0 ? (
-                              <a
-                                className="num-link"
-                                href={fitbaseLeadsUrl(from, to, r.sourceId)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Открыть эти заявки в Fitbase"
-                              >
-                                {num(r.leads)}
-                              </a>
-                            ) : (
-                              <span className="num-link">0</span>
-                            )}
-                          </td>
-                          <td><MiniBar val={r.convSale} max={maxConvSale} /></td>
-                          <td><span className="num-link">{num(r.sales)}</span></td>
-                          <td><span className="num-link">{rub(r.revenue)}</span></td>
-                          <td>{r.avgCheck != null ? rub(r.avgCheck) : "—"}</td>
-                          <td className={r.profit < 0 ? "neg" : ""}>{rub(r.profit)}</td>
-                          <td><span className="num-link">{rub(r.cost)}</span></td>
-                          <td className={r.roi != null ? (Number(r.roi) >= 0 ? "pos" : "neg") : "muted"}>{pct(r.roi)}</td>
+                            ) : null,
+                          )}
                         </tr>
-                        {open && canExpand && (
+                        {open && hasChildren &&
+                          r.children.map((ch) => (
+                            <tr key={r.source + "//" + ch.source} className="child-row">
+                              {channelCells(ch, true)}
+                            </tr>
+                          ))}
+                        {open && hasCamps && (
                           <tr className="campaign-row">
                             <td colSpan={REP_COLS.length}>
                               <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
@@ -710,7 +724,7 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {camps!.map((c, i) => (
+                                  {r.campaigns.map((c, i) => (
                                     <tr key={i}>
                                       <td style={{ textAlign: "left" }}>{c.campaign_name}</td>
                                       <td>{rub(c.cost)}</td>

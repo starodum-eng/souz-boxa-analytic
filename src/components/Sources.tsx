@@ -14,11 +14,51 @@ interface SourceItem {
   kind: "manual" | "auto" | null;
 }
 
+interface ChannelGroup {
+  channel: string;
+  parent: string | null;
+}
+
 export default function Sources() {
   const [items, setItems] = useState<SourceItem[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Укрупнение каналов (ТЗ №18): канал → родитель.
+  const [channels, setChannels] = useState<ChannelGroup[] | null>(null);
+  const [parentHints, setParentHints] = useState<string[]>([]);
+  const [pDrafts, setPDrafts] = useState<Record<string, string>>({});
+  const [pSaving, setPSaving] = useState<string | null>(null);
+
+  function loadChannels() {
+    fetch("/api/channel-groups")
+      .then((r) => r.json())
+      .then((d) => {
+        setChannels(d.items ?? []);
+        setParentHints(d.parents ?? []);
+        const init: Record<string, string> = {};
+        (d.items ?? []).forEach((c: ChannelGroup) => (init[c.channel] = c.parent ?? ""));
+        setPDrafts(init);
+      })
+      .catch(() => {});
+  }
+
+  async function saveParent(channel: string) {
+    setPSaving(channel);
+    try {
+      await fetch("/api/channel-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, parent: pDrafts[channel] ?? "" }),
+      });
+      loadChannels();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPSaving(null);
+    }
+  }
 
   function load() {
     setError(null);
@@ -33,7 +73,10 @@ export default function Sources() {
       .catch((e) => setError(String(e)));
   }
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    loadChannels();
+  }, []);
 
   async function post(payload: Record<string, unknown>, key: string) {
     setSavingKey(key);
@@ -180,6 +223,69 @@ export default function Sources() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Укрупнение каналов: канал → родитель (ТЗ №18) */}
+      <div className="section-title" style={{ marginTop: 22 }}>Укрупнение каналов (родитель)</div>
+      <div className="card muted" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.5 }}>
+        Задайте <b>родителя</b> каналу — в отчёте дочерние каналы схлопнутся в одну строку-родителя
+        (например, «Яндекс.Бизнес (органика/реклама)» → «Яндекс.Бизнес»). Родитель = сумма детей.
+        Пустое поле — канал показывается отдельной строкой.
+      </div>
+      {channels && (
+        <div className="card">
+          <datalist id="parent-hints">
+            {parentHints.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left" }}>Канал</th>
+                  <th style={{ textAlign: "left" }}>Родитель</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {channels.map((c) => (
+                  <tr key={c.channel}>
+                    <td style={{ textAlign: "left" }}>{c.channel}</td>
+                    <td style={{ textAlign: "left" }}>
+                      <input
+                        className="src-input"
+                        list="parent-hints"
+                        value={pDrafts[c.channel] ?? ""}
+                        placeholder="напр. Яндекс.Бизнес"
+                        onChange={(e) => setPDrafts((d) => ({ ...d, [c.channel]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveParent(c.channel);
+                        }}
+                      />
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        className="src-save"
+                        disabled={pSaving === c.channel || (pDrafts[c.channel] ?? "") === (c.parent ?? "")}
+                        onClick={() => saveParent(c.channel)}
+                      >
+                        {pSaving === c.channel ? "…" : "Сохранить"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {channels.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      Каналы появятся после первого пересчёта витрины.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       <div className="card muted" style={{ marginTop: 16, fontSize: 13 }}>

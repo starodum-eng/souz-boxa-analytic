@@ -435,6 +435,10 @@ a.num-link:hover {
   font-weight: 500;
   color: var(--text);
 }
+.child-row td {
+  background: var(--panel-2);
+  font-size: 12.5px;
+}
 
 /* Двублочная таблица «По дням»: маркетинг слева, Fitbase справа */
 .split-table .grp {

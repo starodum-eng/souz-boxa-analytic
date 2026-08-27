@@ -592,6 +592,48 @@ export async function GET(req: Request) {
   }
   bySourceMerged.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
 
+  // ── Укрупнение каналов (ТЗ №18): группируем per-channel строки под родителями.
+  // Родитель = channel_groups[channel] ?? channel. Родитель = СУММА детей по базовым
+  // метрикам, производные ПЕРЕСЧИТЫВАЕМ из суммы (не усредняем проценты).
+  const groupsRows = await db.execute(sql`SELECT channel, parent FROM channel_groups`);
+  const parentOf = new Map<string, string>();
+  for (const g of groupsRows.rows) {
+    const p = String(g.parent ?? "").trim();
+    if (p) parentOf.set(String(g.channel), p);
+  }
+  const campByChild = new Map<string, Array<Record<string, unknown>>>();
+  for (const c of campaignsBySource.rows as Array<Record<string, unknown>>) {
+    const key = String(c.source);
+    (campByChild.get(key) ?? campByChild.set(key, []).get(key)!).push(c);
+  }
+  const parentGroups = new Map<string, typeof bySourceMerged>();
+  for (const child of bySourceMerged) {
+    const parent = parentOf.get(child.source) ?? child.source;
+    (parentGroups.get(parent) ?? parentGroups.set(parent, []).get(parent)!).push(child);
+  }
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const report = [...parentGroups.entries()].map(([parent, kids]) => {
+    const sum = (f: keyof (typeof kids)[number]) => kids.reduce((a, r) => a + Number(r[f] || 0), 0);
+    const cost = sum("cost"), leads = sum("leads"), visits = sum("visits"), clicks = sum("clicks");
+    const clients = sum("clients"), paying = sum("paying"), revenue = sum("revenue"), cohortLtv = sum("cohortLtv");
+    // Дети скрыты, если единственный ребёнок и он сам == родитель (нечего раскрывать).
+    const children = kids.length === 1 && kids[0].source === parent ? [] : kids;
+    const campaigns = kids.flatMap((k) => campByChild.get(k.source) ?? []);
+    return {
+      source: parent,
+      sourceId: children.length === 0 && kids.length === 1 ? (kids[0].sourceId ?? null) : null,
+      cost, clicks, visits, leads, clients, paying, revenue, cohortLtv,
+      cpl: leads > 0 ? r2(cost / leads) : null,
+      cac: cost > 0 && clients > 0 ? r2(cost / clients) : null,
+      romi: cost > 0 ? r4((revenue - cost) / cost) : null,
+      romiCohort: cost > 0 ? r4((cohortLtv - cost) / cost) : null,
+      children,
+      campaigns,
+    };
+  });
+  report.sort((a, b) => b.revenue - a.revenue || b.cost - a.cost);
+
   const cashTotal = revenueTotal;
   const cohortLtvTotal = bySourceMerged.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
 
@@ -626,6 +668,7 @@ export async function GET(req: Request) {
       revenue: Number(prevRevenue.rows[0]?.revenue ?? 0),
     },
     bySource: bySourceMerged,
+    report, // укрупнённые строки-родители с детьми/кампаниями (ТЗ №18)
     campaignsBySource: campaignsBySource.rows,
     channelInfluence: channelInfluence.rows,
     lifetimeByChannel: lifetimeByChannel.rows,

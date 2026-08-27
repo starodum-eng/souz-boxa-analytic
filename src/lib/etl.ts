@@ -431,7 +431,7 @@ export async function recomputeDailyMetrics(): Promise<void> {
           WHEN lower(coalesce(w.utm_source,'')) LIKE '%vk%' THEN 'VK Реклама'
           -- Трафик карточки Яндекс.Бизнеса (помечен в интеграции): платный / органика.
           WHEN lower(coalesce(w.traffic_source,'')) = 'yandex_business_ad' THEN 'Яндекс.Бизнес (реклама)'
-          WHEN lower(coalesce(w.traffic_source,'')) = 'yandex_business' THEN 'Яндекс.Бизнес'
+          WHEN lower(coalesce(w.traffic_source,'')) = 'yandex_business' THEN 'Яндекс.Бизнес (органика)'
           -- Метки нет → смотрим тип трафика (органика/прямые заходы).
           WHEN lower(coalesce(w.traffic_source,'')) = 'organic' THEN 'SEO (органика)'
           WHEN lower(coalesce(w.traffic_source,'')) = 'direct' THEN 'Прямые заходы'
@@ -450,6 +450,19 @@ export async function recomputeDailyMetrics(): Promise<void> {
     ON CONFLICT (date, source) DO UPDATE
       SET visits = daily_metrics.visits + EXCLUDED.visits,
           leads  = daily_metrics.leads  + EXCLUDED.leads
+  `);
+
+  // 3) Ручные расходы: амортизация пакета равномерно по дням периода в cost канала.
+  //    Так расход попадает во все потребители витрины (отчёт, totals, timeline, план/факт).
+  await db.execute(sql`
+    INSERT INTO daily_metrics (date, source, cost)
+    SELECT d::date, mc.channel,
+           mc.amount / ((mc.period_to - mc.period_from) + 1)
+    FROM manual_costs mc,
+         generate_series(mc.period_from, mc.period_to, interval '1 day') d
+    WHERE mc.period_to >= mc.period_from
+    ON CONFLICT (date, source) DO UPDATE
+      SET cost = daily_metrics.cost + EXCLUDED.cost
   `);
 
   // 4) Производные метрики: CPL, CAC, ROMI.

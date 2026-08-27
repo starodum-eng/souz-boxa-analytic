@@ -257,6 +257,32 @@ export const importLog = pgTable("import_log", {
 });
 
 /**
+ * Группировка каналов: ярлык канала → ярлык родителя (укрупнённая строка отчёта).
+ * Родитель в отчёте = сумма детей. Пусто/нет записи → канал сам себе родитель.
+ */
+export const channelGroups = pgTable("channel_groups", {
+  id: serial("id").primaryKey(),
+  channel: varchar("channel", { length: 256 }).notNull().unique(),
+  parent: varchar("parent", { length: 256 }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Ручной ввод расхода по каналу с амортизацией по периоду (пакеты продвижения,
+ * офлайн-реклама и т.п.). Сумма размазывается равномерно по дням периода в
+ * daily_metrics.cost при пересчёте витрины.
+ */
+export const manualCosts = pgTable("manual_costs", {
+  id: serial("id").primaryKey(),
+  channel: varchar("channel", { length: 256 }).notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  periodFrom: date("period_from").notNull(),
+  periodTo: date("period_to").notNull(),
+  note: varchar("note", { length: 512 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Визиты клиентов Fitbase (/v2/client/visits) — посещаемость по дням.
  */
 export const clientVisits = pgTable(
