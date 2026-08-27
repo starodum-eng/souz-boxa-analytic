@@ -25,7 +25,8 @@ function shortDate(s: string): string {
 const N = (s: string) => Number(s) || 0;
 
 export default function Content() {
-  const [week, setWeek] = useState<string>(currentMondayMsk());
+  // По умолчанию — ПРОШЛАЯ неделя (её и заполняем по факту).
+  const [week, setWeek] = useState<string>(addDaysStr(currentMondayMsk(), -7));
   const [vals, setVals] = useState<Record<string, Fields>>({});
   const [baseline, setBaseline] = useState<Record<string, Fields>>({});
   const [prevFollowers, setPrevFollowers] = useState<Record<string, number>>({});
