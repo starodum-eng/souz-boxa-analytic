@@ -375,6 +375,8 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
       avgCheck: sales > 0 ? revenue / sales : null,
       profit: revenue - cost,
       roi: s.romiCohort,
+      cohortLtv: Number(s.cohortLtv) || 0,
+      cac: s.cac,
     };
   };
   const repRows = useMemo(() => {
@@ -413,9 +415,8 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
     { key: "sales", label: "Продажи" },
     { key: "revenue", label: "Выручка" },
     { key: "avgCheck", label: "Средний чек" },
-    { key: "profit", label: "Прибыль" },
     { key: "cost", label: "Расходы" },
-    { key: "roi", label: "ROI" },
+    { key: "profit", label: "Прибыль" },
   ];
 
   const tot = data ? sumMetrics(data.bySource) : null;
@@ -444,9 +445,8 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
       <td><span className="num-link">{num(r.sales)}</span></td>
       <td><span className="num-link">{rub(r.revenue)}</span></td>
       <td>{r.avgCheck != null ? rub(r.avgCheck) : "—"}</td>
-      <td className={r.profit < 0 ? "neg" : ""}>{rub(r.profit)}</td>
       <td><span className="num-link">{rub(r.cost)}</span></td>
-      <td className={r.roi != null ? (Number(r.roi) >= 0 ? "pos" : "neg") : "muted"}>{pct(r.roi)}</td>
+      <td className={r.profit < 0 ? "neg" : ""}>{rub(r.profit)}</td>
     </>
   );
 
@@ -630,9 +630,14 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             </div>
           </div>
 
-          {/* ── Отчёт по каналам ── */}
+          {/* ── Отчёт по каналам (касса за период) ── */}
           <div className="section-title">
-            Отчёт по каналам · {PRESETS.find((pr) => pr.key === preset)?.label ?? `${from} — ${to}`}
+            Каналы за период · {PRESETS.find((pr) => pr.key === preset)?.label ?? `${from} — ${to}`}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>
+            Всё по <b>кассе за выбранный период</b>: сколько денег и клиентов пришло именно в окне.
+            «Прибыль» = Выручка − Расход — это кассовый результат и может быть в минусе, пока новые клиенты
+            не окупились. Окупаемость рекламы по жизни клиента — в таблице ниже.
           </div>
           <div className="card" style={{ padding: 0 }}>
             <div className="report-wrap" style={{ maxHeight: 520, overflowY: "auto" }}>
@@ -676,11 +681,8 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                       <td>{num(tot.paying)}</td>
                       <td>{rub(tot.revenue)}</td>
                       <td>{tot.paying > 0 ? rub(tot.revenue / tot.paying) : "—"}</td>
-                      <td>{rub(tot.revenue - tot.cost)}</td>
                       <td>{rub(tot.cost)}</td>
-                      <td className={data.totals.romi_cohort != null ? (data.totals.romi_cohort >= 0 ? "pos" : "neg") : "muted"}>
-                        {pct(data.totals.romi_cohort ?? null)}
-                      </td>
+                      <td className={tot.revenue - tot.cost < 0 ? "neg" : ""}>{rub(tot.revenue - tot.cost)}</td>
                     </tr>
                   )}
                   {sortedRows.map((r) => {
@@ -730,7 +732,6 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                                 <td className="muted">—</td>
                                 <td className="muted">—</td>
                                 <td className="muted">—</td>
-                                <td className="muted">—</td>
                                 <td>{rub(c.cost)}</td>
                                 <td className="muted">—</td>
                               </tr>
@@ -754,6 +755,56 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             «Прибыль» = выручка − рекламные расходы (маржа, без себестоимости абонемента). «+» раскрывает
             подканалы (их сумма сходится с родителем) или кампании платного канала — у кампаний считается
             только расход (клики/показы/CPC — в подсказке), воронка на уровне кампании не считается («—»).
+          </div>
+
+          {/* ── Окупаемость рекламы по LTV привлечённых (не зависит от кассы окна) ── */}
+          <div className="section-title">Окупаемость рекламы (по LTV)</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>
+            Отобьётся ли реклама за <b>всю жизнь привлечённых клиентов</b>, а не по кассе окна.
+            <b> ROMI = (LTV привлечённых − Расход) ÷ Расход.</b> Может быть плюсовым, даже когда «Прибыль»
+            выше в минусе — LTV клиент приносит месяцами. Только платные каналы (где есть расход).
+          </div>
+          <div className="card" style={{ padding: 0 }}>
+            <div className="report-wrap">
+              <table className="report">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>Канал</th>
+                    <th>Расход</th>
+                    <th>Клиенты (привлечено)</th>
+                    <th>CAC</th>
+                    <th>LTV когорты</th>
+                    <th>ROMI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repRows
+                    .filter((r) => r.cost > 0)
+                    .sort((a, b) => (b.roi ?? -1e9) - (a.roi ?? -1e9))
+                    .map((r) => (
+                      <tr key={r.source}>
+                        <td style={{ textAlign: "left" }}>{SOURCE_LABEL[r.source] ?? r.source}</td>
+                        <td>{rub(r.cost)}</td>
+                        <td>{num(r.clients)}</td>
+                        <td>{r.cac != null ? rub(r.cac) : "—"}</td>
+                        <td>{rub(r.cohortLtv)}</td>
+                        <td className={r.roi != null ? (Number(r.roi) >= 0 ? "pos" : "neg") : "muted"}>{pct(r.roi)}</td>
+                      </tr>
+                    ))}
+                  {repRows.filter((r) => r.cost > 0).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="muted" style={{ padding: 14 }}>
+                        Нет платных каналов с расходом за период.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            «LTV когорты» — сколько принесут за всё время клиенты, привлечённые этим каналом за период.
+            «CAC» = Расход ÷ Клиенты. ROMI сравнивает LTV когорты с расходом на её привлечение.
           </div>
 
           <div className="section-title">Воронка периода</div>
