@@ -66,6 +66,17 @@ interface ReportRow extends SourceRow {
   children: SourceRow[];
   campaigns: CampaignRow[];
 }
+interface Attribution {
+  period: {
+    revTotal: number;
+    revAttributed: number;
+    revCoverage: number;
+    payingTotal: number;
+    payingKnown: number;
+    clientCoverage: number;
+  };
+  byMonth: { month: string; total: number; attributed: number; coverage: number }[];
+}
 interface InfluenceRow {
   source: string;
   clients: number;
@@ -127,6 +138,18 @@ function ddmmyyyy(ymdStr: string): string {
   const [y, m, d] = ymdStr.split("-");
   return `${d}.${m}.${y}`;
 }
+/** Цвет-светофор по покрытию атрибуции: <40% красный, 40–70% жёлтый, ≥70% зелёный. */
+function covColor(c: number): string {
+  if (c < 0.4) return "var(--red)";
+  if (c < 0.7) return "#e0a53b";
+  return "var(--green)";
+}
+function covVerdict(c: number): string {
+  if (c < 0.4) return "Размечено мало — решения по каналам принимать рано: сначала поднять покрытие.";
+  if (c < 0.7) return "Частичное покрытие — ROMI по каналам читать с осторожностью.";
+  return "Покрытие хорошее — ROMI по каналам можно доверять.";
+}
+
 /** Ссылка на отфильтрованный список лидов Fitbase: период + (опц.) источник. */
 function fitbaseLeadsUrl(from: string, to: string, sourceId?: string | null): string {
   const q = new URLSearchParams();
@@ -249,6 +272,7 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pf, setPf] = useState<PlanFact | null>(null);
+  const [attr, setAttr] = useState<Attribution | null>(null);
 
   // План/факт — по ТЕКУЩЕМУ месяцу, независимо от верхнего фильтра периода.
   useEffect(() => {
@@ -257,6 +281,15 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
       .then(setPf)
       .catch(() => {});
   }, []);
+
+  // Качество атрибуции — по тому же периоду, что и метрики.
+  useEffect(() => {
+    setAttr(null);
+    fetch(`/api/attribution?from=${from}&to=${to}`)
+      .then((r) => r.json())
+      .then(setAttr)
+      .catch(() => {});
+  }, [from, to]);
 
   function applyPreset(key: PresetKey) {
     const r = presetRange(key);
@@ -629,6 +662,78 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
               </div>
             </div>
           </div>
+
+          {/* ── Качество атрибуции (читаем раньше отчёта по каналам) ── */}
+          {attr && (
+            <>
+              <div className="section-title">Качество атрибуции</div>
+              <div className="card" style={{ display: "grid", gap: 14 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+                  {(
+                    [
+                      {
+                        label: "Выручка размечена",
+                        cov: attr.period.revCoverage,
+                        sub: `${rub(attr.period.revAttributed)} из ${rub(attr.period.revTotal)} привязано к источнику`,
+                      },
+                      {
+                        label: "Платящие клиенты размечены",
+                        cov: attr.period.clientCoverage,
+                        sub: `${num(attr.period.payingKnown)} из ${num(attr.period.payingTotal)} клиентов с известным источником`,
+                      },
+                    ] as const
+                  ).map((t) => (
+                    <div
+                      key={t.label}
+                      style={{
+                        padding: "12px 14px",
+                        background: "var(--panel-2)",
+                        border: "1px solid var(--border)",
+                        borderLeft: `4px solid ${covColor(t.cov)}`,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div className="muted" style={{ fontSize: 12 }}>{t.label}</div>
+                      <div style={{ fontSize: 26, fontWeight: 800, color: covColor(t.cov), fontVariantNumeric: "tabular-nums" }}>
+                        {pct(t.cov)}
+                      </div>
+                      <div className="muted" style={{ fontSize: 12 }}>{t.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: covColor(attr.period.revCoverage), display: "inline-block", flex: "0 0 auto" }} />
+                  <b>{covVerdict(attr.period.revCoverage)}</b>
+                </div>
+
+                {attr.byMonth.length > 1 && (
+                  <div>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Покрытие выручки по месяцам</div>
+                    <div style={{ width: "100%", height: 130 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={attr.byMonth.map((m) => ({ month: m.month, cov: Math.round(m.coverage * 100) }))}
+                          margin={{ top: 5, right: 12, left: -18, bottom: 0 }}
+                        >
+                          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="month" stroke="var(--muted)" fontSize={11} />
+                          <YAxis stroke="var(--muted)" fontSize={11} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                          <Tooltip formatter={(v: number | string) => `${v}%`} />
+                          <Line type="monotone" dataKey="cov" name="Покрытие" stroke="var(--accent)" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  «Не определён» = офлайн/сарафан/непромеченный трафик. Поднять покрытие: единые UTM в кампаниях,
+                  захват телефона на всех формах, коллтрекинг, передача телефона из бота.
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ── Отчёт по каналам (касса за период) ── */}
           <div className="section-title">
