@@ -77,12 +77,14 @@ export async function GET(req: Request) {
     cpl: f.leads > 0 ? f.cost / f.leads : null,
     cac: f.new_clients > 0 ? f.cost / f.new_clients : null,
     drr: f.revenue > 0 ? (f.cost / f.revenue) * 100 : null,
-    romi: f.cost > 0 ? ((f.revenue - f.cost) / f.cost) * 100 : null,
+    // ROMI из План/факта УБРАН: revenue тут — вся касса (в осн. продления старых
+    // клиентов), а cost — рекламный расход, что даёт абсурдный ROMI и противоречит
+    // ROMI по каналам. Настоящий ROMI — в блоке «Окупаемость рекламы (по LTV)».
     conv_lead: f.visits > 0 ? (f.leads / f.visits) * 100 : null,
     conv_sale: f.new_clients > 0 ? (f.paid_new / f.new_clients) * 100 : null,
   };
 
-  const rows = KPI_METRICS.map((mt) => {
+  const rows = KPI_METRICS.filter((mt) => mt.key !== "romi").map((mt) => {
     const factVal = fact[mt.key] ?? null;
     const target = targets[mt.key] ?? null;
     const forecast =

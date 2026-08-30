@@ -126,7 +126,8 @@ export async function GET(req: Request) {
     -- канал привлечения клиента. Берём id из клиентов И из журнала продаж —
     -- чтобы касса клиента, которого нет в справочнике clients, тоже попала в итог.
     client_channel AS (
-      SELECT ids.client_id, ft.ts, COALESCE(ft.source, 'Не определён') AS source
+      SELECT ids.client_id, ft.ts,
+        CASE WHEN ft.source IS NULL OR lower(trim(ft.source)) = 'null' THEN 'Не определён' ELSE ft.source END AS source
       FROM (
         SELECT fitbase_id AS client_id FROM clients
         UNION
@@ -145,6 +146,9 @@ export async function GET(req: Request) {
       -- LTV привлечённой за период когорты
       COALESCE(SUM(l.ltv) FILTER (WHERE (cc.ts AT TIME ZONE 'Europe/Moscow')::date >= ${from}
                               AND (cc.ts AT TIME ZONE 'Europe/Moscow')::date <= ${to}), 0) AS cohort_ltv,
+      -- КАССОВЫЕ продажи: клиенты канала с оплатой в окне (включая продления старых),
+      -- один-в-один с колонкой «Выручка» → выручка>0 всегда ⇒ продажи>0.
+      COUNT(*) FILTER (WHERE COALESCE(ca.cash,0) > 0)::int AS paying_cash,
       -- касса за период (все оплаты канала в окне, независимо от даты привлечения)
       COALESCE(SUM(ca.cash), 0) AS cash
     FROM client_channel cc
@@ -197,13 +201,13 @@ export async function GET(req: Request) {
       FROM sales_ledger WHERE client_id IS NOT NULL GROUP BY client_id
     )
     SELECT
-      ip.source,
+      CASE WHEN lower(trim(coalesce(ip.source,''))) IN ('', 'null') THEN 'Не определён' ELSE ip.source END AS source,
       COUNT(DISTINCT ip.client_id)::int AS clients,
       COUNT(*) FILTER (WHERE COALESCE(l.ltv,0) > 0)::int AS paying,
       COALESCE(SUM(l.ltv), 0) AS revenue
     FROM in_period ip
     LEFT JOIN ltv l ON l.client_id = ip.client_id
-    GROUP BY ip.source
+    GROUP BY 1
     ORDER BY revenue DESC
   `);
 
@@ -476,7 +480,8 @@ export async function GET(req: Request) {
       SELECT client_id, SUM(amount) AS ltv FROM sales_ledger WHERE client_id IS NOT NULL GROUP BY client_id
     ),
     channel AS (
-      SELECT COALESCE(NULLIF(ft.source,'null'), 'Не определён') AS source, ids.client_id
+      SELECT CASE WHEN ft.source IS NULL OR lower(trim(ft.source)) = 'null' THEN 'Не определён' ELSE ft.source END AS source,
+        ids.client_id
       FROM (
         SELECT fitbase_id AS client_id FROM clients
         UNION
@@ -510,12 +515,13 @@ export async function GET(req: Request) {
 
   // Единая разбивка по источникам: реклама (расход/лиды) + клиенты/выручка (LTV)
   // на одном ключе-канале → настоящий ROMI по каналу, где есть и расход, и деньги.
-  const crMap = new Map<string, { clients: number; paying: number; cohortLtv: number; cash: number }>(
+  const crMap = new Map<string, { clients: number; paying: number; payingCash: number; cohortLtv: number; cash: number }>(
     clientRevBySource.rows.map((r: Record<string, unknown>) => [
       String(r.source),
       {
         clients: Number(r.clients),
         paying: Number(r.paying),
+        payingCash: Number(r.paying_cash), // кассовые продажи (клиенты с оплатой в окне)
         cohortLtv: Number(r.cohort_ltv),
         cash: Number(r.cash),
       },
@@ -528,7 +534,7 @@ export async function GET(req: Request) {
 
   const bySourceMerged = [...allSources].map((source) => {
     const ad = adMap.get(source);
-    const cr = crMap.get(source) ?? { clients: 0, paying: 0, cohortLtv: 0, cash: 0 };
+    const cr = crMap.get(source) ?? { clients: 0, paying: 0, payingCash: 0, cohortLtv: 0, cash: 0 };
     const cost = Number(ad?.cost ?? 0);
     // Лиды = заявки Fitbase по каналу (не цели Метрики).
     const leads = leadsByChannel.get(source) ?? 0;
@@ -543,7 +549,7 @@ export async function GET(req: Request) {
       // id источника Fitbase (если канал = один источник) — для ссылки на список лидов
       sourceId: leadsSourceId.get(source) ?? null,
       clients: cr.clients,
-      paying: cr.paying,
+      paying: cr.payingCash, // «Продажи» на кассовой таблице = кассовые плательщики окна
       revenue, // касса за период
       cohortLtv: cr.cohortLtv, // LTV привлечённой за период когорты
       cpl: leads > 0 ? Math.round((cost / leads) * 100) / 100 : null,
@@ -642,7 +648,11 @@ export async function GET(req: Request) {
   const paidRows = bySourceMerged.filter((r) => Number(r.cost) > 0);
   const paidCost = paidRows.reduce((a, r) => a + Number(r.cost), 0);
   const paidCohortLtv = paidRows.reduce((a, r) => a + Number(r.cohortLtv || 0), 0);
-  const romiCohortTotal = paidCost > 0 ? Math.round(((paidCohortLtv - paidCost) / paidCost) * 10000) / 10000 : null;
+  // Если у платных каналов нет привязанной LTV (атрибуция не сшита), честный ROMI
+  // посчитать нельзя — возвращаем null (в шапке будет «н/д», а не вводящий в
+  // заблуждение −100%). null также при отсутствии платных каналов.
+  const romiCohortTotal =
+    paidCost > 0 && paidCohortLtv > 0 ? Math.round(((paidCohortLtv - paidCost) / paidCost) * 10000) / 10000 : null;
 
   // Средний LTV клиента за всё время = вся выручка ÷ число платящих клиентов.
   const lifeRows = lifetimeByChannel.rows as Array<Record<string, unknown>>;

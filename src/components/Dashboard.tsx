@@ -439,17 +439,17 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
   const maxConvLead = Math.max(0, ...repRows.map((r) => r.convLead ?? 0));
   const maxConvSale = Math.max(0, ...repRows.map((r) => r.convSale ?? 0));
 
-  const REP_COLS: { key: string; label: string; left?: boolean }[] = [
+  const REP_COLS: { key: string; label: string; left?: boolean; hint?: string }[] = [
     { key: "source", label: "Канал", left: true },
     { key: "visits", label: "Визиты" },
     { key: "convLead", label: "Конв. в заявки" },
     { key: "leads", label: "Заявки" },
-    { key: "convSale", label: "Конв. в продажи" },
-    { key: "sales", label: "Продажи" },
+    { key: "convSale", label: "Конв. в продажи", hint: "Здесь не считается: касса включает продления, а заявки — новые обращения. Конверсия привлечения — в «Воронке периода»." },
+    { key: "sales", label: "Продажи", hint: "Клиенты с оплатой в этом окне (включая продления старых). Выручка>0 ⇒ Продажи>0." },
     { key: "revenue", label: "Выручка" },
     { key: "avgCheck", label: "Средний чек" },
     { key: "cost", label: "Расходы" },
-    { key: "profit", label: "Прибыль" },
+    { key: "profit", label: "Маржа", hint: "Выручка − рекламный расход. Без себестоимости абонемента — это не бухгалтерская прибыль." },
   ];
 
   const tot = data ? sumMetrics(data.bySource) : null;
@@ -474,7 +474,12 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
           <span className="num-link">0</span>
         )}
       </td>
-      <td><MiniBar val={r.convSale} max={maxConvSale} /></td>
+      <td
+        className="muted"
+        title="Касса включает продления, а «Заявки» — новые обращения, поэтому конверсия Заявки→Продажи здесь не считается. Настоящая конверсия привлечения — в блоке «Воронка периода»."
+      >
+        —
+      </td>
       <td><span className="num-link">{num(r.sales)}</span></td>
       <td><span className="num-link">{rub(r.revenue)}</span></td>
       <td>{r.avgCheck != null ? rub(r.avgCheck) : "—"}</td>
@@ -523,11 +528,16 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             <Stat label="Продажи" value={num(t.paid_new)} />
             <Stat label="Выручка" value={rub(t.revenue)} delta={<Delta cur={t.revenue} prev={p?.revenue ?? 0} />} />
             <Stat label="Расходы" value={rub(t.cost)} delta={<Delta cur={t.cost} prev={p?.cost ?? 0} mode="neutral" />} />
-            <Stat
-              label="ROI"
-              value={pct(t.romi_cohort ?? null)}
-              cls={t.romi_cohort != null ? (t.romi_cohort >= 0 ? "pos" : "neg") : ""}
-            />
+            {t.romi_cohort == null ? (
+              <Stat
+                label="ROI"
+                value="н/д"
+                cls="muted"
+                title="ROMI платных каналов не считается: клики не сшиты с оплатами (LTV привлечённых = 0). См. блок «Качество атрибуции»."
+              />
+            ) : (
+              <Stat label="ROI" value={pct(t.romi_cohort)} cls={t.romi_cohort >= 0 ? "pos" : "neg"} />
+            )}
             <Stat label="LTV/CAC" value={ltvCacStr(t)} cls={ltvCacCls(t)} />
           </div>
 
@@ -538,7 +548,7 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
               const monthLabel = new Date(yy, mm - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
               const hasAny = pf.rows.some((r) => r.target != null);
               const fmt = (unit: string, v: number | null) =>
-                v == null ? "—" : unit === "₽" ? rub(v) : unit === "%" ? `${Math.round(v)}%` : num(v);
+                v == null ? "—" : unit === "₽" ? rub(v) : unit === "%" ? `${Math.round(v)}%` : num(Math.round(v));
               const dot = (s: string) =>
                 s === "green" ? "var(--green)" : s === "yellow" ? "var(--gold)" : s === "red" ? "var(--red)" : "var(--muted)";
               return (
@@ -754,8 +764,10 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                         key={c.key}
                         style={{ textAlign: c.left ? "left" : "right" }}
                         onClick={() => toggleSort(c.key)}
+                        title={c.hint}
                       >
                         {c.label}
+                        {c.hint ? " ⓘ" : ""}
                         {sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                       </th>
                     ))}
@@ -782,7 +794,7 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                           num(tot.leads)
                         )}
                       </td>
-                      <td>{tot.clients > 0 ? pct(tot.paying / tot.clients) : "—"}</td>
+                      <td className="muted" title="Конверсия Заявки→Продажи здесь не считается (касса vs привлечение) — см. «Воронка периода».">—</td>
                       <td>{num(tot.paying)}</td>
                       <td>{rub(tot.revenue)}</td>
                       <td>{tot.paying > 0 ? rub(tot.revenue / tot.paying) : "—"}</td>
@@ -936,9 +948,15 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             })()}
             <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
               Визиты — из Метрики (сайт), Лиды — заявки Fitbase (воронка «Новые лиды»),
-              Клиенты — из Fitbase. Конверсия Визит→Лид межсистемная и ориентировочная
+              Клиенты — новые клиенты Fitbase по дате регистрации в выбранном окне (тот же
+              источник, что в «По дням»). Конверсия Визит→Лид межсистемная и ориентировочная
               (у части лидов нет визита на сайт — звонки/чат-бот); Клиент→Оплата — доля
               новых клиентов периода, сделавших оплату.
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              ⏳ Клиенты и Оплаты <b>лагают</b>: заявка этой недели превращается в клиента и
+              оплату позже (цикл пробное → оплата). За короткое окно «Клиенты 0» может быть
+              нормой — смотрите «Когорты» и месячное окно.
             </div>
           </div>
 
@@ -1184,10 +1202,10 @@ function ltvCacCls(t: Totals): string {
   return r == null ? "" : r >= 3 ? "pos" : r < 1 ? "neg" : "";
 }
 
-function Stat({ label, value, delta, cls }: { label: string; value: string; delta?: ReactNode; cls?: string }) {
+function Stat({ label, value, delta, cls, title }: { label: string; value: string; delta?: ReactNode; cls?: string; title?: string }) {
   return (
-    <div className="stat">
-      <div className="s-label">{label}</div>
+    <div className="stat" title={title}>
+      <div className="s-label">{label}{title ? " ⓘ" : ""}</div>
       <div className={`s-value ${cls ?? ""}`}>
         {value}
         {delta}
