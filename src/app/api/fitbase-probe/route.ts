@@ -62,7 +62,18 @@ export async function GET() {
     funnelDirs[path] = await call(path.includes("?") ? path : `${path}?page=1&page_size=100`);
   }
 
-  return NextResponse.json({ funnelConfigured: FUNNEL, leadFilters, funnelDirs });
+  // 3) /client: работает ли ?updated_at= (иначе тянем все ~20k и не доходим до новых)?
+  //    И можно ли отсортировать НОВЫЕ первыми (чтобы partial-синк ловил свежих клиентов)?
+  const recent = Math.floor(Date.now() / 1000) - 3 * 86400; // 3 дня назад
+  const clientProbe: Record<string, unknown> = {};
+  clientProbe["no_filter"] = await call(`/client?page=1&page_size=1`);
+  clientProbe[`updated_at=${recent}`] = await call(`/client?updated_at=${recent}&page=1&page_size=1`);
+  // варианты сортировки по убыванию id/даты — смотрим, меняется ли первый элемент на «свежий»
+  for (const q of ["sort=-id", "sort=-created_at", "order=desc", "order_by=id&order=desc", "sort=id&direction=desc", "sortBy=created_at&sortOrder=desc"]) {
+    clientProbe[q] = await call(`/client?${q}&page=1&page_size=1`);
+  }
+
+  return NextResponse.json({ funnelConfigured: FUNNEL, leadFilters, funnelDirs, clientProbe });
 }
 
 /** Форма объекта: ключи → тип/значение (без простыней), с раскрытием funnel_step. */
