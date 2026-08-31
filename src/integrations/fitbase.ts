@@ -187,16 +187,13 @@ function withUpdated(path: string, since?: number): string {
  * (только имена для «Удержания»; атрибуция строится на лидах/касаниях), поэтому неполный
  * справочник допустим: следующий прогон доберёт (upsert идемпотентен).
  */
-export async function fetchFitbaseClients(
-  _range: DateRange,
-  updatedSince?: number,
-): Promise<{ rows: ClientRow[]; complete: boolean }> {
-  const { items, complete } = await fetchAllPages(withUpdated("/client", updatedSince), "/client", {
-    concurrency: 1,
-    throttleMs: 350,
-    partialOk: true,
-  });
-  const rows = items.map((c) => ({
+export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[]> {
+  // ВАЖНО: /client НЕ поддерживает ?updated_at= (Fitbase отдаёт 500) — проверено
+  // пробником. Инкрементал тут ломал синк: с первого же водяного знака запросы шли
+  // с updated_at → 500 → клиенты переставали обновляться (новые не подтягивались).
+  // Клиентов всего ~3.7k, поэтому тянем ПОЛНОСТЬЮ каждый синк — это быстро и надёжно.
+  const { items } = await fetchAllPages("/client", "/client", { concurrency: 3 });
+  return items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     name: fullName(c),
     phone: extractPhone(c),
@@ -206,7 +203,6 @@ export async function fetchFitbaseClients(
     createdAt: toDate(c.created_at),
     raw: c,
   }));
-  return { rows, complete };
 }
 
 /**
