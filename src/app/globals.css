@@ -154,6 +154,25 @@ body {
   font-size: 13px;
   color-scheme: light;
 }
+.daterange button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.daterange button:hover {
+  border-color: var(--muted);
+}
+.daterange button.active {
+  border-color: var(--accent);
+  background: rgba(224, 39, 27, 0.08);
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .src-input {
   background: var(--panel);

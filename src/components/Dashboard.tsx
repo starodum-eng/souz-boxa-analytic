@@ -499,11 +499,6 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
           <div className="sub">Реклама → визиты → лиды → клиенты. Данные обновляются раз в сутки.</div>
         </div>
         <div className="controls">
-          {PRESETS.map((pr) => (
-            <button key={pr.key} className={pr.key === preset ? "active" : ""} onClick={() => applyPreset(pr.key)}>
-              {pr.label}
-            </button>
-          ))}
           <button onClick={handleSync} disabled={syncing} className="sync-btn">
             {syncing ? "Обновление…" : "Обновить данные"}
           </button>
@@ -515,6 +510,11 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
         <input type="date" value={from} max={to} onChange={(e) => { setPreset("custom"); setFrom(e.target.value); }} />
         <span className="muted">—</span>
         <input type="date" value={to} min={from} onChange={(e) => { setPreset("custom"); setTo(e.target.value); }} />
+        {PRESETS.map((pr) => (
+          <button key={pr.key} className={pr.key === preset ? "active" : ""} onClick={() => applyPreset(pr.key)}>
+            {pr.label}
+          </button>
+        ))}
         {preset === "custom" && <span className="badge">свой период</span>}
       </div>
 
