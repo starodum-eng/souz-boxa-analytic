@@ -265,9 +265,17 @@ export async function fetchFitbaseLeads(
     };
   });
 
-  // Список этапов задан → оставляем только их (воронка «Новые лиды»).
-  // Не задан → fail-open (все лиды), чтобы не потерять данные до настройки.
-  const rows = STEP_IDS.size ? mapped.filter((r) => r.funnelId != null && STEP_IDS.has(r.funnelId)) : mapped;
+  // Фильтры:
+  //  1) Дубли: Fitbase помечает повторные заявки с того же телефона флагом is_duplicate.
+  //     6 отправок одной VK-лид-формы одним человеком — это НЕ 6 заявок. Отбрасываем
+  //     is_duplicate=1 (можно отключить FITBASE_LEADS_KEEP_DUPLICATES=1).
+  //  2) Этапы: список задан → только этапы воронки «Новые лиды»; не задан → все (fail-open).
+  const keepDup = process.env.FITBASE_LEADS_KEEP_DUPLICATES === "1";
+  const rows = mapped.filter((r) => {
+    if (!keepDup && Number((r.raw as { is_duplicate?: unknown }).is_duplicate) === 1) return false;
+    if (STEP_IDS.size) return r.funnelId != null && STEP_IDS.has(r.funnelId);
+    return true;
+  });
   return { rows, rawCount: items.length };
 }
 
