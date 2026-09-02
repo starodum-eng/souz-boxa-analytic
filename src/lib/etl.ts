@@ -42,7 +42,9 @@ export async function runFullSync(): Promise<SyncResult[]> {
   const range = lastNDays(SYNC_WINDOW_DAYS);
   const results: SyncResult[] = [];
 
-  const CHUNK = 500;
+  // Крупнее пакет → меньше HTTP-round-trip'ов к Neon (neon-http = запрос на вставку).
+  // 1000 строк × ~13 колонок ≈ 13k параметров — с запасом под лимит Postgres (65535).
+  const CHUNK = 1000;
 
   // Инкрементальный синк: тянем только изменённые с прошлого успешного прогона.
   const syncStartUnix = Math.floor(Date.now() / 1000);
@@ -327,7 +329,7 @@ export async function runFullSync(): Promise<SyncResult[]> {
     const uniq = new Map<string, (typeof touches)[number]>();
     for (const t of touches) uniq.set(t.externalId, t);
     const rows = [...uniq.values()];
-    const CHUNK = 500;
+    const CHUNK = 1000;
     for (let i = 0; i < rows.length; i += CHUNK) {
       const batch = rows.slice(i, i + CHUNK).map((t) => ({
         externalId: t.externalId,

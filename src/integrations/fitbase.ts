@@ -105,7 +105,7 @@ async function fetchAllPages(
   endpointName: string,
   opts: PageOpts = {},
 ): Promise<{ items: any[]; complete: boolean }> {
-  const { concurrency = 3, throttleMs = 0, partialOk = false } = opts;
+  const { concurrency = 6, throttleMs = 0, partialOk = false } = opts;
   const headers = authHeaders();
   const sep = path.includes("?") ? "&" : "?";
   // Больше попыток и длиннее backoff (до 8с) — штраф за частоту снимается не сразу.
@@ -192,7 +192,7 @@ export async function fetchFitbaseClients(_range: DateRange): Promise<ClientRow[
   // пробником. Инкрементал тут ломал синк: с первого же водяного знака запросы шли
   // с updated_at → 500 → клиенты переставали обновляться (новые не подтягивались).
   // Клиентов всего ~3.7k, поэтому тянем ПОЛНОСТЬЮ каждый синк — это быстро и надёжно.
-  const { items } = await fetchAllPages("/client", "/client", { concurrency: 3 });
+  const { items } = await fetchAllPages("/client", "/client");
   return items.map((c) => ({
     fitbaseId: String(c.id ?? ""),
     name: fullName(c),
@@ -271,9 +271,15 @@ export async function fetchFitbaseLeads(
   return { rows, rawCount: items.length };
 }
 
-/** Визиты клиентов (/v2/client/visits) — посещаемость. Тянем недавние по updated_at. */
-export async function fetchFitbaseVisits(range: DateRange): Promise<FitbaseVisitRow[]> {
-  const fromUnix = Math.floor(new Date(`${range.from}T00:00:00Z`).getTime() / 1000);
+/**
+ * Визиты клиентов (/v2/client/visits) — посещаемость. Самый «жирный» эндпоинт
+ * (десятки тысяч строк за 95 дней). Для «Удержания» нужен лишь ПОСЛЕДНИЙ визит
+ * (не ходит 14+ дней), для «По дням» — визиты в окне дашборда. Поэтому окно визитов
+ * отдельное и короткое: FITBASE_VISITS_DAYS (по умолч. 45) — это резко ускоряет синк.
+ */
+export async function fetchFitbaseVisits(_range: DateRange): Promise<FitbaseVisitRow[]> {
+  const days = Number(process.env.FITBASE_VISITS_DAYS) || 45;
+  const fromUnix = Math.floor(Date.now() / 1000) - days * 86400;
   const { items } = await fetchAllPages(`/client/visits?updated_at=${fromUnix}`, "/client/visits");
   return items.map((v) => ({
     fitbaseId: String(v.id ?? ""),
