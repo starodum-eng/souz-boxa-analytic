@@ -61,6 +61,10 @@ interface CampaignRow {
   cost: number;
   clicks: number;
   impressions: number;
+  leads: number;
+  visits: number;
+  sales: number;
+  revenue: number;
 }
 interface ReportRow extends SourceRow {
   children: SourceRow[];
@@ -833,9 +837,15 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                           hasCamps &&
                           r.campaigns.map((c, i) => {
                             const cpc = Number(c.clicks) > 0 ? Number(c.cost) / Number(c.clicks) : null;
-                            // Кампания транслирует колонки родителя: расход → «Расходы»,
-                            // остальные (воронка/выручка) не считаются на уровне кампании → «—».
-                            // Клики/показы/CPC — в подсказке на названии.
+                            // Кампания транслирует колонки родителя. Заявки/визиты/продажи/
+                            // выручка — по utm_campaign (заявки без метки — звонки/чат — в
+                            // разбивку не попадают, остаются в итоге канала). Клики/показы/CPC
+                            // — в подсказке на названии.
+                            const cLeads = Number(c.leads);
+                            const cVisits = Number(c.visits);
+                            const cSales = Number(c.sales);
+                            const cRev = Number(c.revenue);
+                            const margin = cRev - Number(c.cost);
                             return (
                               <tr key={r.source + "/camp/" + i} className="child-row">
                                 <td
@@ -845,15 +855,23 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
                                   <span className="muted" style={{ marginRight: 4 }}>└</span>
                                   {c.campaign_name}
                                 </td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
-                                <td className="muted">—</td>
+                                <td>{cVisits > 0 ? <span className="num-link">{num(cVisits)}</span> : <span className="muted">—</span>}</td>
+                                <td>{cVisits > 0 ? pct(cLeads / cVisits) : <span className="muted">—</span>}</td>
+                                <td>
+                                  {cLeads > 0 ? (
+                                    <a className="num-link" href={fitbaseLeadsUrl(from, to)} target="_blank" rel="noopener noreferrer" title="Заявки этой кампании (по utm_campaign)">
+                                      {num(cLeads)}
+                                    </a>
+                                  ) : (
+                                    <span className="muted">—</span>
+                                  )}
+                                </td>
+                                <td className="muted" title="Конверсия по кампании кассовая → не считается (см. пояснение к колонке)">—</td>
+                                <td>{cSales > 0 ? <span className="num-link">{num(cSales)}</span> : <span className="muted">—</span>}</td>
+                                <td>{cRev > 0 ? <span className="num-link">{rub(cRev)}</span> : <span className="muted">—</span>}</td>
+                                <td>{cSales > 0 ? rub(cRev / cSales) : <span className="muted">—</span>}</td>
                                 <td>{rub(c.cost)}</td>
-                                <td className="muted">—</td>
+                                <td className={margin < 0 ? "neg" : ""}>{Number(c.cost) > 0 || cRev > 0 ? rub(margin) : <span className="muted">—</span>}</td>
                               </tr>
                             );
                           })}
@@ -872,9 +890,11 @@ export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } 
             </div>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-            «Прибыль» = выручка − рекламные расходы (маржа, без себестоимости абонемента). «+» раскрывает
-            подканалы (их сумма сходится с родителем) или кампании платного канала — у кампаний считается
-            только расход (клики/показы/CPC — в подсказке), воронка на уровне кампании не считается («—»).
+            «Маржа» = выручка − рекламные расходы (без себестоимости абонемента). «+» раскрывает подканалы
+            (их сумма сходится с родителем) или кампании платного канала. У кампаний заявки/визиты/продажи/
+            выручка считаются по метке utm_campaign (клики/показы/CPC — в подсказке). Заявки без метки
+            (звонки/чат-бот) в разбивку по кампаниям не попадают — остаются в итоге канала, поэтому сумма
+            по кампаниям может быть меньше строки-канала.
           </div>
 
           {/* ── Окупаемость рекламы по LTV привлечённых (не зависит от кассы окна) ── */}

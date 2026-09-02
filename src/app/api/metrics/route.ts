@@ -355,15 +355,84 @@ export async function GET(req: Request) {
         ELSE source::text
       END AS source,
       COALESCE(campaign_name, '—') AS campaign_name,
+      lower(coalesce(utm_campaign, '')) AS uc,
       COALESCE(SUM(cost), 0)        AS cost,
       COALESCE(SUM(clicks), 0)      AS clicks,
       COALESCE(SUM(impressions), 0) AS impressions
     FROM ad_spend
     WHERE date >= ${from} AND date <= ${to}
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
     HAVING SUM(cost) > 0 OR SUM(clicks) > 0 OR SUM(impressions) > 0
     ORDER BY 1, cost DESC
   `);
+
+  // Атрибуция по КАМПАНИЯМ (по utm_campaign): заявки, визиты, продажи, выручка.
+  // Матчинг с ad_spend по lower(utm_campaign). Заявки/визиты без метки кампании
+  // (звонки/чат) в разбивку не попадают — остаются в итоге канала.
+  const campLeads = await db.execute(sql`
+    SELECT lower(utm_campaign) AS uc, COUNT(*)::int AS leads
+    FROM fitbase_leads
+    WHERE created_at IS NOT NULL AND coalesce(utm_campaign,'') <> ''
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+      AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+    GROUP BY 1
+  `);
+  const campVisits = await db.execute(sql`
+    SELECT lower(utm_campaign) AS uc, COALESCE(SUM(visits),0)::int AS visits
+    FROM web_sessions
+    WHERE date >= ${from} AND date <= ${to} AND coalesce(utm_campaign,'') <> ''
+    GROUP BY 1
+  `);
+  // Продажи/выручка по кампании = клиенты, у кого ПЕРВОЕ касание было с этой utm_campaign,
+  // и их касса в окне (first-touch на уровне кампании — как в атрибуции по каналам).
+  const campSales = await db.execute(sql`
+    WITH touches AS (
+      SELECT c.fitbase_id AS client_id, lt.created_at AS ts, lower(lt.utm_campaign) AS uc
+      FROM lead_touches lt
+      JOIN clients c ON right(regexp_replace(coalesce(c.phone,''), '\\D', '', 'g'), 10) = lt.phone_norm
+      WHERE lt.phone_norm IS NOT NULL AND coalesce(lt.utm_campaign,'') <> ''
+      UNION ALL
+      SELECT fl.client_id, fl.created_at, lower(fl.utm_campaign)
+      FROM fitbase_leads fl WHERE fl.client_id IS NOT NULL AND coalesce(fl.utm_campaign,'') <> ''
+    ),
+    first_touch AS (
+      SELECT DISTINCT ON (client_id) client_id, uc
+      FROM touches WHERE uc <> '' ORDER BY client_id, ts ASC NULLS LAST
+    ),
+    cash AS (
+      SELECT client_id, SUM(amount) AS cash FROM sales_ledger
+      WHERE client_id IS NOT NULL AND pay_date IS NOT NULL
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date >= ${from}
+        AND (pay_date AT TIME ZONE 'Europe/Moscow')::date <= ${to}
+      GROUP BY client_id
+    )
+    SELECT ft.uc,
+      COUNT(*) FILTER (WHERE COALESCE(ca.cash,0) > 0)::int AS sales,
+      COALESCE(SUM(ca.cash),0) AS revenue
+    FROM first_touch ft
+    LEFT JOIN cash ca ON ca.client_id = ft.client_id
+    GROUP BY ft.uc
+  `);
+  const cLeads = new Map<string, number>((campLeads.rows as Array<Record<string, unknown>>).map((r) => [String(r.uc), Number(r.leads)]));
+  const cVisits = new Map<string, number>((campVisits.rows as Array<Record<string, unknown>>).map((r) => [String(r.uc), Number(r.visits)]));
+  const cSales = new Map<string, { sales: number; revenue: number }>(
+    (campSales.rows as Array<Record<string, unknown>>).map((r) => [String(r.uc), { sales: Number(r.sales), revenue: Number(r.revenue) }]),
+  );
+  const campaignsEnriched = (campaignsBySource.rows as Array<Record<string, unknown>>).map((c) => {
+    const uc = String(c.uc ?? "");
+    const s = uc ? cSales.get(uc) : undefined;
+    return {
+      source: c.source,
+      campaign_name: c.campaign_name,
+      cost: Number(c.cost),
+      clicks: Number(c.clicks),
+      impressions: Number(c.impressions),
+      leads: uc ? cLeads.get(uc) ?? 0 : 0,
+      visits: uc ? cVisits.get(uc) ?? 0 : 0,
+      sales: s?.sales ?? 0,
+      revenue: s?.revenue ?? 0,
+    };
+  });
 
   // Новые клиенты Fitbase за период (CRM-конверсия, нижняя ступень воронки).
   const clientsAgg = await db.execute(sql`
@@ -608,7 +677,7 @@ export async function GET(req: Request) {
     if (p) parentOf.set(String(g.channel), p);
   }
   const campByChild = new Map<string, Array<Record<string, unknown>>>();
-  for (const c of campaignsBySource.rows as Array<Record<string, unknown>>) {
+  for (const c of campaignsEnriched) {
     const key = String(c.source);
     (campByChild.get(key) ?? campByChild.set(key, []).get(key)!).push(c);
   }
@@ -679,7 +748,7 @@ export async function GET(req: Request) {
     },
     bySource: bySourceMerged,
     report, // укрупнённые строки-родители с детьми/кампаниями (ТЗ №18)
-    campaignsBySource: campaignsBySource.rows,
+    campaignsBySource: campaignsEnriched,
     channelInfluence: channelInfluence.rows,
     lifetimeByChannel: lifetimeByChannel.rows,
     byDate: byDate.rows,
