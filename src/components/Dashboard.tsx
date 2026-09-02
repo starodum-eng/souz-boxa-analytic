@@ -170,15 +170,15 @@ function startOfWeek(d: Date): Date {
   return addDays(x, -dow);
 }
 
-type PresetKey = "today" | "yesterday" | "thisWeek" | "lastWeek" | "7d" | "30d" | "90d";
+type PresetKey = "today" | "yesterday" | "thisWeek" | "lastWeek" | "7d" | "thisMonth" | "lastMonth";
 const PRESETS: { key: PresetKey; label: string }[] = [
   { key: "today", label: "Сегодня" },
   { key: "yesterday", label: "Вчера" },
   { key: "thisWeek", label: "Эта нед." },
   { key: "lastWeek", label: "Прошл. нед." },
   { key: "7d", label: "7 дн." },
-  { key: "30d", label: "30 дн." },
-  { key: "90d", label: "90 дн." },
+  { key: "thisMonth", label: "Этот мес." },
+  { key: "lastMonth", label: "Прошл. мес." },
 ];
 
 function presetRange(key: PresetKey): { from: string; to: string } {
@@ -199,10 +199,13 @@ function presetRange(key: PresetKey): { from: string; to: string } {
     }
     case "7d":
       return { from: ymd(addDays(today, -6)), to: ymd(today) };
-    case "30d":
-      return { from: ymd(addDays(today, -29)), to: ymd(today) };
-    case "90d":
-      return { from: ymd(addDays(today, -89)), to: ymd(today) };
+    case "thisMonth":
+      return { from: ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to: ymd(today) };
+    case "lastMonth": {
+      const firstPrev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const lastPrev = new Date(today.getFullYear(), today.getMonth(), 0); // 0-й день тек. месяца = последний день прошлого
+      return { from: ymd(firstPrev), to: ymd(lastPrev) };
+    }
   }
 }
 
@@ -258,8 +261,8 @@ interface PlanFact {
 }
 
 export default function Dashboard({ onGoTargets }: { onGoTargets?: () => void } = {}) {
-  const initial = presetRange("30d");
-  const [preset, setPreset] = useState<PresetKey | "custom">("30d");
+  const initial = presetRange("thisMonth");
+  const [preset, setPreset] = useState<PresetKey | "custom">("thisMonth");
   const [from, setFrom] = useState<string>(initial.from);
   const [to, setTo] = useState<string>(initial.to);
   const [data, setData] = useState<Data | null>(null);
