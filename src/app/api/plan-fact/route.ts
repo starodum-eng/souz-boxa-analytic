@@ -34,8 +34,16 @@ export async function GET(req: Request) {
   let f = zero;
   if (factTo) {
     const ad = await db.execute(sql`
-      SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(leads),0) AS leads, COALESCE(SUM(visits),0) AS visits
+      SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(visits),0) AS visits
       FROM daily_metrics WHERE date >= ${monthStart} AND date <= ${factTo}
+    `);
+    // «Лиды» = заявки Fitbase (тот же источник, что KPI «Заявки» на дашборде),
+    // а НЕ цели Метрики из daily_metrics.leads (иначе план/факт расходится с шапкой).
+    const ld = await db.execute(sql`
+      SELECT COUNT(*)::int AS leads FROM fitbase_leads
+      WHERE created_at IS NOT NULL
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date >= ${monthStart}
+        AND (created_at AT TIME ZONE 'Europe/Moscow')::date <= ${factTo}
     `);
     const rev = await db.execute(sql`
       SELECT COALESCE(SUM(amount),0) AS revenue FROM sales_ledger
@@ -56,7 +64,7 @@ export async function GET(req: Request) {
     `);
     f = {
       cost: Number(ad.rows[0]?.cost ?? 0),
-      leads: Number(ad.rows[0]?.leads ?? 0),
+      leads: Number(ld.rows[0]?.leads ?? 0),
       visits: Number(ad.rows[0]?.visits ?? 0),
       revenue: Number(rev.rows[0]?.revenue ?? 0),
       new_clients: Number(cl.rows[0]?.new_clients ?? 0),
