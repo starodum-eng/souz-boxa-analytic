@@ -356,12 +356,13 @@ export async function GET(req: Request) {
       END AS source,
       COALESCE(campaign_name, '—') AS campaign_name,
       lower(coalesce(utm_campaign, '')) AS uc,
+      lower(coalesce(campaign_id, '')) AS cid,
       COALESCE(SUM(cost), 0)        AS cost,
       COALESCE(SUM(clicks), 0)      AS clicks,
       COALESCE(SUM(impressions), 0) AS impressions
     FROM ad_spend
     WHERE date >= ${from} AND date <= ${to}
-    GROUP BY 1, 2, 3
+    GROUP BY 1, 2, 3, 4
     HAVING SUM(cost) > 0 OR SUM(clicks) > 0 OR SUM(impressions) > 0
     ORDER BY 1, cost DESC
   `);
@@ -419,18 +420,30 @@ export async function GET(req: Request) {
     (campSales.rows as Array<Record<string, unknown>>).map((r) => [String(r.uc), { sales: Number(r.sales), revenue: Number(r.revenue) }]),
   );
   const campaignsEnriched = (campaignsBySource.rows as Array<Record<string, unknown>>).map((c) => {
-    const uc = String(c.uc ?? "");
-    const s = uc ? cSales.get(uc) : undefined;
+    // Матчим лид ↔ кампанию по utm_campaign И по campaign_id: у VK-лид-форм в
+    // utm_campaign лежит ID кампании (напр. "29673485"), а расход назван словами —
+    // сшивка только по названию не срабатывает, нужен campaign_id.
+    const keys = [...new Set([String(c.uc ?? ""), String(c.cid ?? "")].filter(Boolean))];
+    let leads = 0, visits = 0, sales = 0, revenue = 0;
+    for (const k of keys) {
+      leads += cLeads.get(k) ?? 0;
+      visits += cVisits.get(k) ?? 0;
+      const s = cSales.get(k);
+      if (s) {
+        sales += s.sales;
+        revenue += s.revenue;
+      }
+    }
     return {
       source: c.source,
       campaign_name: c.campaign_name,
       cost: Number(c.cost),
       clicks: Number(c.clicks),
       impressions: Number(c.impressions),
-      leads: uc ? cLeads.get(uc) ?? 0 : 0,
-      visits: uc ? cVisits.get(uc) ?? 0 : 0,
-      sales: s?.sales ?? 0,
-      revenue: s?.revenue ?? 0,
+      leads,
+      visits,
+      sales,
+      revenue,
     };
   });
 
