@@ -1,123 +1,70 @@
 {
-  "name": "VK Ads lead-forms → Fitbase (UTM enrichment)",
+  "name": "VK лид-формы -> Fitbase (Союз Бокса)",
   "nodes": [
-    {
-      "parameters": {
-        "content": "## VK лид-формы → Fitbase с правильными UTM\n\nЗачем: нативная интеграция VK→Fitbase кладёт в utm_campaign один и тот же id для всех заявок,\nпоэтому в дашборде не видно, с какой РК пришёл лид. Этот воркфлоу берёт лид из VK Ads,\nдостаёт из него ad_plan / ad_group / banner id и создаёт заявку в Fitbase с UTM:\n\n  utm_source  = vk_ads\n  utm_medium  = lead_form\n  utm_campaign= ad_plan_id   (рекламная кампания)\n  utm_term    = ad_group_id  (группа)\n  utm_content = banner_id     (объявление)\n\nВАЖНО: отключи нативную интеграцию VK→Fitbase (или её создание лидов),\nиначе будет дубль: одна заявка нативно + одна отсюда.\n\nЗаполнить (см. жёлтые заметки у нод):\n 1) VK Ads: токен + точный эндпоинт выгрузки лидов форм + id форм.\n 2) Fitbase: FITBASE_API_KEY, FITBASE_DOMAIN, эндпоинт создания заявки и имена полей.\n 3) Проверить, какому уровню соответствует наш ad_spend.campaign_id\n    (кампания или группа) — от этого зависит, совпадёт ли utm_campaign или utm_term.",
-        "height": 360,
-        "width": 460
-      },
-      "id": "note-overview",
-      "name": "О воркфлоу",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [-40, -40]
-    },
     {
       "parameters": {
         "rule": {
           "interval": [
-            { "field": "minutes", "minutesInterval": 15 }
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
           ]
         }
       },
-      "id": "trigger-schedule",
-      "name": "Каждые 15 минут",
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Каждые 10 минут",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [480, 200]
+      "position": [180, 320]
     },
     {
       "parameters": {
-        "content": "### 1) Выгрузка лидов из VK Ads\n\nЗамени URL на реальный эндпоинт выгрузки лидов лид-форм из твоего кабинета\n(ads.vk.com / VK Ads API, раздел lead_ads/leadgen).\n\n- Заголовок Authorization: Bearer <<VK_ADS_TOKEN>>\n- Параметры: период (последние ~30 мин с запасом), id форм.\n- В ответе по каждому лиду должны быть: имя, телефон, ad_plan_id,\n  ad_group_id (в API часто = campaign_id), banner_id, дата.\n\nЕсли VK умеет webhook на новый лид — можно заменить триггер на Webhook-ноду\nи убрать расписание.",
-        "height": 300,
-        "width": 420
-      },
-      "id": "note-vk",
-      "name": "Заметка VK",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [700, -40]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://ads.vk.com/api/v2/lead_ads/leads.json",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "limit", "value": "200" },
-            { "name": "date_from", "value": "={{ $now.minus({ minutes: 40 }).toFormat('yyyy-LL-dd') }}" },
-            { "name": "date_to", "value": "={{ $now.toFormat('yyyy-LL-dd') }}" }
-          ]
-        },
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            { "name": "Authorization", "value": "Bearer <<VK_ADS_TOKEN>>" }
-          ]
-        },
+        "operation": "executeQuery",
+        "query": "SELECT access_token, expires_at FROM oauth_tokens WHERE provider = 'vk_ads' ORDER BY updated_at DESC LIMIT 1;",
         "options": {}
       },
-      "id": "http-vk-leads",
-      "name": "VK: получить лиды",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [720, 200]
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Neon: взять токен VK",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [400, 320],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Neon Postgres"
+        }
+      }
     },
     {
       "parameters": {
-        "fieldToSplitOut": "items",
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(array_agg(lead_id), ARRAY[]::text[]) AS ids FROM vk_processed_leads;",
         "options": {}
       },
-      "id": "split-leads",
-      "name": "Разбить на лиды",
-      "type": "n8n-nodes-base.splitOut",
-      "typeVersion": 1,
-      "position": [960, 200]
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "Neon: обработанные ID",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [620, 320],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Neon Postgres"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "// Маппинг лида VK → полезная нагрузка для Fitbase.\n// Подгони пути к полям под реальный ответ VK (см. один лид в предыдущей ноде).\nconst out = [];\nfor (const item of $input.all()) {\n  const l = item.json;\n\n  // --- достаём поля лида (поправь пути под свой ответ VK) ---\n  const phoneRaw = l.phone ?? l.contact_phone ?? (l.answers && l.answers.phone) ?? '';\n  const name     = l.name  ?? l.contact_name  ?? (l.answers && l.answers.name)  ?? '';\n  const adPlanId = l.ad_plan_id  ?? l.campaign_id ?? l.plan_id  ?? '';\n  const adGroupId= l.ad_group_id ?? l.group_id    ?? '';\n  const bannerId = l.banner_id   ?? l.ad_id        ?? '';\n  const leadId   = l.id ?? l.lead_id ?? '';\n\n  // нормализуем телефон в 11 цифр (7XXXXXXXXXX)\n  let phone = String(phoneRaw).replace(/\\D/g, '');\n  if (phone.length === 10) phone = '7' + phone;\n  if (phone.length === 11 && phone.startsWith('8')) phone = '7' + phone.slice(1);\n\n  out.push({ json: {\n    external_lead_id: String(leadId),\n    name: String(name).trim(),\n    phone,\n    utm_source:  'vk_ads',\n    utm_medium:  'lead_form',\n    utm_campaign: String(adPlanId),   // ← рекламная кампания (ad_plan)\n    utm_term:     String(adGroupId),  // ← группа (ad_group)\n    utm_content:  String(bannerId),   // ← объявление (banner)\n  }});\n}\nreturn out;"
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Токен из отдельного узла Neon\nconst tokenRow = $('Neon: взять токен VK').first().json || {};\nconst token = tokenRow.access_token;\nif (!token) throw new Error('Neon: не найден access_token (provider=vk_ads).');\nif (tokenRow.expires_at) {\n  const exp = new Date(tokenRow.expires_at).getTime();\n  if (exp && exp < Date.now()) throw new Error('VK токен протух (expires_at в прошлом). Дай дашборду освежить его.');\n}\n\n// Уже обработанные lead_id приходят на вход из узла \"Neon: обработанные ID\"\nconst processed = new Set((($input.first() || { json: {} }).json.ids || []).map(String));\n\nconst BASE = 'https://ads.vk.com';\nconst H = { Authorization: `Bearer ${token}` };\n\n// 1) Список лид-форм\nlet forms = [];\ntry {\n  const r = await this.helpers.httpRequest({ method: 'GET', url: `${BASE}/api/v1/lead_ads/lead_forms.json`, headers: H, qs: { limit: 250, offset: 0 }, json: true });\n  forms = r.items || [];\n} catch (e) {\n  const c = e.statusCode || e.httpCode || '';\n  throw new Error(`VK: список лид-форм не получен (${c}).`);\n}\n\n// 2) Лиды по формам, дедуп по id в рамках прогона (VK дублирует лид по формам)\nconst byId = {};\nfor (const form of forms) {\n  const fid = form.id;\n  if (!fid) continue;\n  try {\n    const r = await this.helpers.httpRequest({ method: 'GET', url: `${BASE}/api/v1/lead_ads/leads.json`, headers: H, qs: { lead_form_id: fid, limit: 200, offset: 0 }, json: true });\n    for (const l of (r.items || [])) { if (l && l.id != null) byId[String(l.id)] = l; }\n  } catch (e) { continue; }\n}\n\n// 3) Оставляем только НЕобработанные, мапим\nconst out = [];\nfor (const id of Object.keys(byId)) {\n  const cleanId = String(id).replace(/\\D/g, '');\n  if (processed.has(cleanId) || processed.has(id)) continue; // durable-дедуп из Neon\n\n  const l = byId[id];\n  const ci = l.contact_info || {};\n  const phone = String(ci.phone || ci.phone_number || '').replace(/\\D/g, '');\n  if (!phone) continue;\n\n  const name = [ci.first_name, ci.last_name].filter(Boolean).join(' ').trim() || ci.name || 'Лид VK';\n  const email = ci.email || '';\n  const qa = (l.answers || []).map(a => {\n    const q = (a.question_text || '').trim();\n    const ans = (a.answer_options || []).map(o => o.text).filter(Boolean).join(', ') || a.answer || a.value || '';\n    return q ? `${q} ${ans}` : ans;\n  }).filter(Boolean).join(' | ');\n\n  // --- Многоуровневые id объявления (для привязки к РК/группе/креативу в дашборде) ---\n  // ВАЖНО: проверь имена полей по реальному лиду VK (см. вывод узла на одном лиде).\n  // Разные версии API кладут их по-разному, поэтому берём с запасом фолбэков.\n  const adPlanId  = l.ad_plan_id  ?? l.campaign_id ?? l.plan_id  ?? '';\n  const adGroupId = l.ad_group_id ?? l.group_id    ?? l.adgroup_id ?? '';\n  const bannerId  = l.banner_id   ?? l.ad_id       ?? l.creative_id ?? '';\n\n  out.push({ json: {\n    name, phone, email,\n    title: `Заявка из лид-формы VK${l.form_name ? ' («' + l.form_name + '»)' : ''}`,\n    description: qa,\n    utm_source: 'vk_ads',\n    utm_medium: 'lead_form',\n    utm_campaign: String(adPlanId || l.form_id || ''), // рекламная кампания (ad_plan)\n    utm_term: String(adGroupId || ''),                  // группа объявлений (ad_group)\n    utm_content: String(bannerId || ''),                // объявление (banner)\n    vk_lead_id: cleanId\n  }});\n}\nreturn out;\n"
       },
-      "id": "code-map",
-      "name": "Собрать UTM + payload",
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "VK: лиды + маппинг",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1180, 200]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
-          "conditions": [
-            {
-              "leftValue": "={{ $json.phone }}",
-              "rightValue": "^7\\d{10}$",
-              "operator": { "type": "string", "operation": "regex" }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-valid-phone",
-      "name": "Телефон валиден?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [1400, 200]
-    },
-    {
-      "parameters": {
-        "content": "### 2) Создание заявки в Fitbase\n\nЗамени на реальный эндпоинт создания лида (уточни у поддержки Fitbase / в доке v2).\n\n- Заголовки: Authorization: Bearer <<FITBASE_API_KEY>>, domain: <<FITBASE_DOMAIN>>\n- Тело: имя, телефон, utm_source/medium/campaign, при желании advertising_source\n  = 'Вконтакте' и funnels_id воронки «Новые лиды».\n- Имена полей тела подгони под то, что ждёт Fitbase.\n\nДубли: Fitbase сам ставит is_duplicate по телефону — наш дашборд их уже не считает,\nтак что повторные отправки формы не раздуют заявки.",
-        "height": 300,
-        "width": 420
-      },
-      "id": "note-fitbase",
-      "name": "Заметка Fitbase",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [1620, -40]
+      "position": [840, 320]
     },
     {
       "parameters": {
@@ -126,39 +73,72 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "Bearer <<FITBASE_API_KEY>>" },
-            { "name": "domain", "value": "<<FITBASE_DOMAIN>>" },
+            { "name": "domain", "value": "soyuz-boksa" },
+            { "name": "Authorization", "value": "Bearer ВАШ_FITBASE_TOKEN" },
+            { "name": "Content-Type", "value": "application/json" },
             { "name": "Accept", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  name: $json.name,\n  phone: $json.phone,\n  utm_source: $json.utm_source,\n  utm_medium: $json.utm_medium,\n  utm_campaign: $json.utm_campaign,\n  utm_term: $json.utm_term,\n  utm_content: $json.utm_content,\n  advertising_source: 'Вконтакте'\n}) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify({\n  name: $json.name,\n  phone: $json.phone,\n  email: $json.email,\n  title: $json.title,\n  description: $json.description,\n  funnels_id: 1,\n  advertising_source_id: 3,\n  club: 1,\n  utm_source: $json.utm_source,\n  utm_medium: $json.utm_medium,\n  utm_campaign: $json.utm_campaign,\n  utm_term: $json.utm_term,\n  utm_content: $json.utm_content\n}) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 400
+            }
+          }
+        }
       },
-      "id": "http-fitbase",
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
       "name": "Fitbase: создать заявку",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1640, 200]
+      "position": [1060, 320]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO vk_processed_leads(lead_id) VALUES ('{{ $json.vk_lead_id }}') ON CONFLICT (lead_id) DO NOTHING;",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Neon: отметить обработанным",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1280, 320],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "Neon Postgres"
+        }
+      }
     }
   ],
   "connections": {
-    "Каждые 15 минут": {
-      "main": [[{ "node": "VK: получить лиды", "type": "main", "index": 0 }]]
+    "Каждые 10 минут": {
+      "main": [[{ "node": "Neon: взять токен VK", "type": "main", "index": 0 }]]
     },
-    "VK: получить лиды": {
-      "main": [[{ "node": "Разбить на лиды", "type": "main", "index": 0 }]]
+    "Neon: взять токен VK": {
+      "main": [[{ "node": "Neon: обработанные ID", "type": "main", "index": 0 }]]
     },
-    "Разбить на лиды": {
-      "main": [[{ "node": "Собрать UTM + payload", "type": "main", "index": 0 }]]
+    "Neon: обработанные ID": {
+      "main": [[{ "node": "VK: лиды + маппинг", "type": "main", "index": 0 }]]
     },
-    "Собрать UTM + payload": {
-      "main": [[{ "node": "Телефон валиден?", "type": "main", "index": 0 }]]
+    "VK: лиды + маппинг": {
+      "main": [[{ "node": "Fitbase: создать заявку", "type": "main", "index": 0 }]]
     },
-    "Телефон валиден?": {
-      "main": [[{ "node": "Fitbase: создать заявку", "type": "main", "index": 0 }], []]
+    "Fitbase: создать заявку": {
+      "main": [[{ "node": "Neon: отметить обработанным", "type": "main", "index": 0 }]]
     }
   },
-  "settings": { "executionOrder": "v1" }
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "project": "soyuz-boksa",
+    "note": "Дедуп durable в Neon (vk_processed_leads). Отметка ПОСЛЕ Fitbase. Токен из oauth_tokens(vk_ads). Лид-формы API v1 ads.vk.com. Контакты в contact_info. UTM: vk_ads/lead_form + campaign=ad_plan_id, term=ad_group_id, content=banner_id (проверь имена полей id по реальному лиду)."
+  }
 }
