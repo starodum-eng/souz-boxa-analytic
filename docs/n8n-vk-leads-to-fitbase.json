@@ -1,0 +1,164 @@
+{
+  "name": "VK Ads lead-forms → Fitbase (UTM enrichment)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## VK лид-формы → Fitbase с правильными UTM\n\nЗачем: нативная интеграция VK→Fitbase кладёт в utm_campaign один и тот же id для всех заявок,\nпоэтому в дашборде не видно, с какой РК пришёл лид. Этот воркфлоу берёт лид из VK Ads,\nдостаёт из него ad_plan / ad_group / banner id и создаёт заявку в Fitbase с UTM:\n\n  utm_source  = vk_ads\n  utm_medium  = lead_form\n  utm_campaign= ad_plan_id   (рекламная кампания)\n  utm_term    = ad_group_id  (группа)\n  utm_content = banner_id     (объявление)\n\nВАЖНО: отключи нативную интеграцию VK→Fitbase (или её создание лидов),\nиначе будет дубль: одна заявка нативно + одна отсюда.\n\nЗаполнить (см. жёлтые заметки у нод):\n 1) VK Ads: токен + точный эндпоинт выгрузки лидов форм + id форм.\n 2) Fitbase: FITBASE_API_KEY, FITBASE_DOMAIN, эндпоинт создания заявки и имена полей.\n 3) Проверить, какому уровню соответствует наш ad_spend.campaign_id\n    (кампания или группа) — от этого зависит, совпадёт ли utm_campaign или utm_term.",
+        "height": 360,
+        "width": 460
+      },
+      "id": "note-overview",
+      "name": "О воркфлоу",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-40, -40]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 15 }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Каждые 15 минут",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "content": "### 1) Выгрузка лидов из VK Ads\n\nЗамени URL на реальный эндпоинт выгрузки лидов лид-форм из твоего кабинета\n(ads.vk.com / VK Ads API, раздел lead_ads/leadgen).\n\n- Заголовок Authorization: Bearer <<VK_ADS_TOKEN>>\n- Параметры: период (последние ~30 мин с запасом), id форм.\n- В ответе по каждому лиду должны быть: имя, телефон, ad_plan_id,\n  ad_group_id (в API часто = campaign_id), banner_id, дата.\n\nЕсли VK умеет webhook на новый лид — можно заменить триггер на Webhook-ноду\nи убрать расписание.",
+        "height": 300,
+        "width": 420
+      },
+      "id": "note-vk",
+      "name": "Заметка VK",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [700, -40]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://ads.vk.com/api/v2/lead_ads/leads.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "limit", "value": "200" },
+            { "name": "date_from", "value": "={{ $now.minus({ minutes: 40 }).toFormat('yyyy-LL-dd') }}" },
+            { "name": "date_to", "value": "={{ $now.toFormat('yyyy-LL-dd') }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer <<VK_ADS_TOKEN>>" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-vk-leads",
+      "name": "VK: получить лиды",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {}
+      },
+      "id": "split-leads",
+      "name": "Разбить на лиды",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Маппинг лида VK → полезная нагрузка для Fitbase.\n// Подгони пути к полям под реальный ответ VK (см. один лид в предыдущей ноде).\nconst out = [];\nfor (const item of $input.all()) {\n  const l = item.json;\n\n  // --- достаём поля лида (поправь пути под свой ответ VK) ---\n  const phoneRaw = l.phone ?? l.contact_phone ?? (l.answers && l.answers.phone) ?? '';\n  const name     = l.name  ?? l.contact_name  ?? (l.answers && l.answers.name)  ?? '';\n  const adPlanId = l.ad_plan_id  ?? l.campaign_id ?? l.plan_id  ?? '';\n  const adGroupId= l.ad_group_id ?? l.group_id    ?? '';\n  const bannerId = l.banner_id   ?? l.ad_id        ?? '';\n  const leadId   = l.id ?? l.lead_id ?? '';\n\n  // нормализуем телефон в 11 цифр (7XXXXXXXXXX)\n  let phone = String(phoneRaw).replace(/\\D/g, '');\n  if (phone.length === 10) phone = '7' + phone;\n  if (phone.length === 11 && phone.startsWith('8')) phone = '7' + phone.slice(1);\n\n  out.push({ json: {\n    external_lead_id: String(leadId),\n    name: String(name).trim(),\n    phone,\n    utm_source:  'vk_ads',\n    utm_medium:  'lead_form',\n    utm_campaign: String(adPlanId),   // ← рекламная кампания (ad_plan)\n    utm_term:     String(adGroupId),  // ← группа (ad_group)\n    utm_content:  String(bannerId),   // ← объявление (banner)\n  }});\n}\nreturn out;"
+      },
+      "id": "code-map",
+      "name": "Собрать UTM + payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.phone }}",
+              "rightValue": "^7\\d{10}$",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-valid-phone",
+      "name": "Телефон валиден?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "content": "### 2) Создание заявки в Fitbase\n\nЗамени на реальный эндпоинт создания лида (уточни у поддержки Fitbase / в доке v2).\n\n- Заголовки: Authorization: Bearer <<FITBASE_API_KEY>>, domain: <<FITBASE_DOMAIN>>\n- Тело: имя, телефон, utm_source/medium/campaign, при желании advertising_source\n  = 'Вконтакте' и funnels_id воронки «Новые лиды».\n- Имена полей тела подгони под то, что ждёт Fitbase.\n\nДубли: Fitbase сам ставит is_duplicate по телефону — наш дашборд их уже не считает,\nтак что повторные отправки формы не раздуют заявки.",
+        "height": 300,
+        "width": 420
+      },
+      "id": "note-fitbase",
+      "name": "Заметка Fitbase",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1620, -40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.fitbase.io/api/v2/lead",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer <<FITBASE_API_KEY>>" },
+            { "name": "domain", "value": "<<FITBASE_DOMAIN>>" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  name: $json.name,\n  phone: $json.phone,\n  utm_source: $json.utm_source,\n  utm_medium: $json.utm_medium,\n  utm_campaign: $json.utm_campaign,\n  utm_term: $json.utm_term,\n  utm_content: $json.utm_content,\n  advertising_source: 'Вконтакте'\n}) }}",
+        "options": {}
+      },
+      "id": "http-fitbase",
+      "name": "Fitbase: создать заявку",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 200]
+    }
+  ],
+  "connections": {
+    "Каждые 15 минут": {
+      "main": [[{ "node": "VK: получить лиды", "type": "main", "index": 0 }]]
+    },
+    "VK: получить лиды": {
+      "main": [[{ "node": "Разбить на лиды", "type": "main", "index": 0 }]]
+    },
+    "Разбить на лиды": {
+      "main": [[{ "node": "Собрать UTM + payload", "type": "main", "index": 0 }]]
+    },
+    "Собрать UTM + payload": {
+      "main": [[{ "node": "Телефон валиден?", "type": "main", "index": 0 }]]
+    },
+    "Телефон валиден?": {
+      "main": [[{ "node": "Fitbase: создать заявку", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
